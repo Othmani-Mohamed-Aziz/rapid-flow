@@ -160,6 +160,11 @@ jobs:
       - name: Prefetch models (no-op si cache hit)
         env:
           HF_HUB_DISABLE_TELEMETRY: "1"
+          # Token optionnel : augmente les quotas HF Hub (60 req/h anonyme →
+          # 5000 req/h authentifié) et accélère le 1er run / les invalidations
+          # de cache. Pour les modèles publics par défaut (e5, bge-reranker,
+          # Qdrant/bm25), l'absence du secret reste fonctionnelle.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python scripts/prefetch_vector_models.py
 
       - name: Wait for Qdrant
@@ -183,6 +188,9 @@ jobs:
           ECRF_ENABLE_SPARSE_BM25: "true"
           ECRF_ENABLE_RERANKER: "false"
           ECRF_RUN_QDRANT_INTEGRATION: "1"
+          # Si un test déclenche un download HF hors du prefetch (cache miss
+          # ponctuel, nouveau modèle, etc.), HF_TOKEN évite le rate-limit.
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           pytest -q \
                  --cov=app \
