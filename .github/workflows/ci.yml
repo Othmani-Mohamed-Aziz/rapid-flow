@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# Annule les anciens runs sur la même PR quand on push à nouveau.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 1 — Lint + type + audit sécurité
+  # ──────────────────────────────────────────────────────────────────────
+  lint-type-audit:
+    name: Lint + type + audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dev tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Ruff (lint)
+        run: ruff check app tests scripts
+
+      - name: Ruff (format check)
+        run: ruff format --check app tests scripts
+
+      - name: Mypy (type check)
+        run: mypy app
+
+      - name: pip-audit (CVE check)
+        # Strict pour le runtime ; pour les dev/extras lourds (torch, etc.),
+        # voir le job séparé si besoin.
+        run: pip-audit --strict --skip-editable -r <(pip freeze --exclude-editable)
+        shell: bash
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 2 — Tests unitaires (matrice 3.12 / 3.13, sans Qdrant)
+  # ──────────────────────────────────────────────────────────────────────
+  tests-unit:
+    name: Unit tests (Py ${{ matrix.python-version }})
+    needs: [lint-type-audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project + dev (sans Docling pour la suite unit)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Pytest (suite par défaut, memory backend)
+        env:
+          ECRF_VECTOR_BACKEND: memory
+          ECRF_ENABLE_SPARSE_BM25: "false"
+          ECRF_ENABLE_RERANKER: "false"
+        run: |
+          pytest -q \
+                 --cov=app \
+                 --cov-report=term-missing \
+                 --cov-report=xml \
+                 --cov-fail-under=70
+
+      - name: Upload coverage (artifact)
+        if: matrix.python-version == '3.13'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Job 3 — Intégration Qdrant (dense + BM25 + RRF, Py 3.13 uniquement)
+  # ──────────────────────────────────────────────────────────────────────
+  tests-integration:
+    name: Integration Qdrant (Py 3.13)
+    needs: [tests-unit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.18.0
+        ports:
+          - 6333:6333
+          - 6334:6334
+        options: >-
+          --health-cmd="bash -c 'exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e \"GET /healthz HTTP/1.0\\r\\n\\r\\n\" >&3 && head -n 1 <&3 | grep -q 200'"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project + dev + vector + docling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,vector,docling]"
+
+      # ── Cache HuggingFace (modèles e5 / bge-reranker / Qdrant bm25) ──
+      # Clé statique : la liste de modèles ne change qu'avec un commit
+      # touchant les défauts de Settings. Granularité par OS + Python.
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-cache-v1-${{ runner.os }}-py3.13-${{ hashFiles('app/config/settings.py') }}
+          restore-keys: |
+            hf-cache-v1-${{ runner.os }}-py3.13-
+            hf-cache-v1-${{ runner.os }}-
+
+      - name: Prefetch models (no-op si cache hit)
+        env:
+          HF_HUB_DISABLE_TELEMETRY: "1"
+        run: python scripts/prefetch_vector_models.py
+
+      - name: Wait for Qdrant
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:6333/healthz > /dev/null; then
+              echo "Qdrant up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "Qdrant didn't become healthy"; exit 1
+
+      - name: Pytest (intégration Qdrant — hybride + dense_only)
+        env:
+          ECRF_VECTOR_BACKEND: qdrant
+          ECRF_QDRANT_URL: http://localhost:6333
+          ECRF_QDRANT_COLLECTION_PREFIX: ecrf_chunks_citest
+          ECRF_ENABLE_SPARSE_BM25: "true"
+          ECRF_ENABLE_RERANKER: "false"
+          ECRF_RUN_QDRANT_INTEGRATION: "1"
+        run: |
+          pytest -v \
+                 tests/test_qdrant_bootstrap.py \
+                 tests/test_qdrant_vector_service_unit.py \
+                 tests/test_qdrant_integration.py

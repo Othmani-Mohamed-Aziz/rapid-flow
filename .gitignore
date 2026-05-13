@@ -1,0 +1,64 @@
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ── Virtualenvs ──────────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Caches outils ────────────────────────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# ── Packaging / build ────────────────────────────────────────────────────
+*.egg-info/
+dist/
+build/
+*.egg
+
+# ── IDE ──────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*~
+
+# ── OS ───────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Secrets / config locale ──────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Données patient / médicales (NE JAMAIS COMMITTER) ────────────────────
+# Conserver la structure du dossier via `data/.gitkeep` (vide).
+data/*
+!data/.gitkeep
+!data/README.md
+
+# ── Sorties pipeline ─────────────────────────────────────────────────────
+outputs/
+
+# ── Fichiers temporaires de debug ────────────────────────────────────────
+parsed_*.json
+*.log
+*.tmp
+
+# ── Caches modèles HF (utilisateur, hors repo) ───────────────────────────
+.cache/
+
+# ── Docker volumes locaux (au cas où) ────────────────────────────────────
+qdrant_storage/
+hf_cache/

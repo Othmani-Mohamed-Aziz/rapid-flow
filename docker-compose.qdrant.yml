@@ -1,0 +1,24 @@
+# Compose v2 : l'attribut `version` n'est plus nécessaire (et déclenche un warning).
+#
+# Ports alternatifs (6533 / 6534) pour cohabiter avec un autre Qdrant occupant
+# les ports 6333 / 6334 (cas typique : self-hosted AI starter kit avec n8n).
+# Adaptez `ECRF_QDRANT_URL` dans `.env` en conséquence.
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: rapid_flow_qdrant
+    restart: unless-stopped
+    ports:
+      - "6533:6333"   # REST   (host:container)
+      - "6534:6334"   # gRPC
+    # NB : on ne définit PAS `QDRANT__SERVICE__API_KEY` du tout pour rester en
+    # mode anonyme (dev local). Une valeur vide ("") est interprétée par Qdrant
+    # v1.18+ comme « API key requise mais vide » → 401 Unauthorized.
+    # Pour activer l’auth en production : définir `QDRANT__SERVICE__API_KEY: <token>`
+    # ici et `ECRF_QDRANT_API_KEY=<token>` côté `.env`.
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    volumes:
+      - qdrant_storage:/qdrant/storage
+volumes:
+  qdrant_storage:

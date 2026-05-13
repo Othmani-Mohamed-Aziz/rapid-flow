@@ -1,0 +1,117 @@
+# ============================================================================
+# rapid-flow — Stack de tests conteneurisée (parité avec la CI GitHub)
+# ============================================================================
+#
+# Usage typique :
+#
+#   # Suite par défaut (memory backend, rapide)
+#   docker compose -f docker-compose.test.yml run --rm test-runner
+#
+#   # Suite + intégration Qdrant hybride (dense + BM25 + RRF)
+#   docker compose -f docker-compose.test.yml --profile integration up -d qdrant
+#   docker compose -f docker-compose.test.yml run --rm test-integration
+#
+#   # Nettoyage
+#   docker compose -f docker-compose.test.yml --profile integration down -v
+#
+# Notes :
+# - Les modèles HF sont cachés dans le volume `hf_cache` → un seul DL pour
+#   tous les futurs runs.
+# - On force Python 3.13 dans l'image `test` (le crash fastembed concerne
+#   Python 3.14 + Windows uniquement). Sous Linux toute la stack hybride
+#   tourne nativement.
+# - Le service `qdrant` ici écoute sur ports internes 6333/6334 et est
+#   exposé sur l'hôte en 6535/6536 pour cohabiter avec :
+#     * Qdrant du starter-kit n8n sur 6333/6334
+#     * Qdrant rapid_flow_qdrant (compose `docker-compose.qdrant.yml`) sur 6533/6534
+# ============================================================================
+
+services:
+
+  # ── Qdrant dédié à la suite de tests CI-parity ─────────────────────────
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: rapid_flow_qdrant_test
+    profiles: ["integration"]
+    restart: "no"
+    environment:
+      QDRANT__LOG_LEVEL: WARN
+    ports:
+      - "6535:6333"
+      - "6536:6334"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q 200"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - rapidflow-test
+
+  # ── Suite pytest par défaut (memory backend, hors Qdrant) ──────────────
+  test-runner:
+    build:
+      context: .
+      target: test
+      args:
+        PYTHON_VERSION: "3.13"
+    image: rapid-flow:test
+    container_name: rapid_flow_test_runner
+    environment:
+      ECRF_VECTOR_BACKEND: memory
+      ECRF_ENABLE_SPARSE_BM25: "false"
+      ECRF_ENABLE_RERANKER: "false"
+      # Cache HF persistant → 1 seul téléchargement Docling/HF.
+      HF_HOME: /opt/hf-cache
+    volumes:
+      - hf_cache:/opt/hf-cache
+      # Mount des sources en dev pour itération rapide (commentez en CI où
+      # tout est copié dans l'image).
+      # - .:/app
+    working_dir: /app
+    command: ["pytest", "-q", "--cov=app", "--cov-report=term-missing"]
+    networks:
+      - rapidflow-test
+
+  # ── Suite pytest + intégration Qdrant (hybride + dense_only) ───────────
+  test-integration:
+    build:
+      context: .
+      target: test
+      args:
+        PYTHON_VERSION: "3.13"
+    image: rapid-flow:test
+    container_name: rapid_flow_test_integration
+    profiles: ["integration"]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    environment:
+      # Qdrant joignable via hostname réseau Compose.
+      ECRF_VECTOR_BACKEND: qdrant
+      ECRF_QDRANT_URL: http://qdrant:6333
+      ECRF_QDRANT_COLLECTION_PREFIX: ecrf_chunks_citest
+      ECRF_ENABLE_SPARSE_BM25: "true"
+      ECRF_ENABLE_RERANKER: "false"
+      ECRF_RUN_QDRANT_INTEGRATION: "1"
+      HF_HOME: /opt/hf-cache
+    volumes:
+      - hf_cache:/opt/hf-cache
+    working_dir: /app
+    command:
+      [
+        "pytest",
+        "-v",
+        "tests/test_qdrant_integration.py",
+        "tests/test_qdrant_vector_service_unit.py",
+        "tests/test_qdrant_bootstrap.py",
+      ]
+    networks:
+      - rapidflow-test
+
+volumes:
+  hf_cache:
+    name: rapid_flow_hf_cache
+
+networks:
+  rapidflow-test:
+    name: rapid_flow_test_net

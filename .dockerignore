@@ -1,0 +1,66 @@
+# Garde les builds Docker légers et reproductibles.
+
+# Python / OS
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual envs (utilisateur)
+.venv/
+venv/
+env/
+
+# Caches outils
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# Distribution / build
+*.egg-info/
+build/
+dist/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker (n'embarque pas la définition dans l'image)
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# CI
+.github/
+
+# Données locales / sorties pipeline (peuvent être lourdes / privées)
+outputs/
+data/
+*.pdf
+*.xlsx
+
+# Variables locales
+.env
+.env.*
+!.env.example
+
+# Caches modèles HF (montés en volume au runtime, pas dans l'image)
+.cache/
+
+# Fichiers utilitaires
+*.log
+*.tmp
+parsed_sample_*.json
+README.md.bak

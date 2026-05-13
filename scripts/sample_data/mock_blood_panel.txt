@@ -1,0 +1,20 @@
+Bilan biologique — patient fictif
+Date prelevement: 2026-03-15
+
+Contexte : suivi hépatocarcinome, antécédent de cirrhose alcoolique compensée.
+
+Hématologie
+Hb 12.4 g/dL
+Plaquettes 145 G/L
+
+Coagulation
+INR 1.15
+
+Hépatite / foie
+AST 48 U/L
+ALT 35 U/L
+Bilirubine totale 22 µmol/L
+
+Inflammation / marqueurs
+CRP 6 mg/L
+AFP 24 UI/mL

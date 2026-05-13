@@ -1,0 +1,126 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecrf-autofill"
+version = "0.1.0"
+description = "Backend modulaire eCRF Autofill — ingestion, extraction spécialisée, ETL eCRF"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "pypdf>=4.0",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=5.0",
+  "reportlab>=4.0",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  "pip-audit>=2.7",
+  "pre-commit>=3.7",
+]
+docling = [
+  "docling>=2.0.0",
+]
+api = [
+  "fastapi>=0.110",
+  "uvicorn>=0.27",
+]
+vector = [
+  "qdrant-client>=1.10",
+  "sentence-transformers>=3.0",
+  "fastembed>=0.3",
+  "tenacity>=8.0",
+]
+# Couche LlamaIndex (optionnelle) — utile uniquement si vous voulez plugger
+# des Index / QueryEngine LlamaIndex au-dessus du même backend Qdrant.
+llamaindex = [
+  "llama-index-core>=0.11",
+  "llama-index-vector-stores-qdrant>=0.3",
+  "llama-index-embeddings-huggingface>=0.3",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pytest
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+  "optional_user_pdf: parse un PDF fourni via ECRF_TEST_PDF_PATH ou tests/fixtures/local_lab.pdf",
+  "ct_integration_pdf: intégration sur data/ct_scan_report_liver.pdf (ou ECRF_CT_TEST_PDF_PATH)",
+  "real_vector_backend: test opt-in qui utilise un vrai backend vector store (Qdrant + fastembed/torch) ; sinon les tests sont forcés en mode `memory` pour isolation",
+]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Ruff (lint + format)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+  ".venv",
+  "outputs",
+  "build",
+  "dist",
+  "data",
+]
+
+[tool.ruff.lint]
+# Démarrage volontairement modéré pour ne pas inonder le baseline.
+# On ajoutera `B` (bugbear), `UP` (pyupgrade) progressivement.
+select = ["E", "F", "I", "W"]
+ignore = [
+  "E501",  # ligne longue (déjà géré par formatter)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # imports après importorskip / monkeypatch légitimes
+"scripts/*" = ["E402"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Mypy (mode souple au démarrage — on durcira par module)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+warn_return_any = false
+disallow_untyped_defs = false
+check_untyped_defs = true
+exclude = ["tests/", "scripts/", "build/", "dist/", "outputs/"]
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Coverage (gate à 70 % au démarrage, à monter progressivement)
+# ──────────────────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+  "app/**/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
+show_missing = true
+skip_covered = false
+precision = 1

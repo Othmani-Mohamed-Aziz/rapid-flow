@@ -1,0 +1,50 @@
+# Pre-commit hooks — mêmes outils que la CI (ruff + mypy).
+#
+# Installation (une fois par dev) :
+#   pip install -e ".[dev]"
+#   pre-commit install
+#
+# Exécution manuelle sur tout le repo :
+#   pre-commit run --all-files
+#
+# Pour ne PAS lancer les hooks ponctuellement (urgence) :
+#   git commit --no-verify
+
+repos:
+  # ── Hygiène fichiers ───────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=2048]   # bloque les fichiers > 2 MiB
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── Ruff (lint + format) ───────────────────────────────────────────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ── Mypy (type check) ──────────────────────────────────────────────────
+  # On lance via le venv local pour aligner les versions de deps types
+  # avec celles de pyproject. `entry: bash -c` permet de cibler app/ seul.
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+        args: ["app"]
+        stages: [pre-commit, pre-push]
