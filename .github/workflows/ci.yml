@@ -80,7 +80,12 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Pytest (suite par défaut, memory backend)
+      # ⚠️ Job unit volontairement « smoke » : sans extras lourds (vector,
+      # docling) pour rester rapide. Du coup la couverture globale chute (les
+      # modules optionnels ne sont jamais importés). On ne met PAS de gate
+      # coverage ici : la gate est vérifiée dans `tests-integration` (qui
+      # installe tous les extras et exécute la suite complète).
+      - name: Pytest (smoke unit, memory backend)
         env:
           ECRF_VECTOR_BACKEND: memory
           ECRF_ENABLE_SPARSE_BM25: "false"
@@ -88,23 +93,27 @@ jobs:
         run: |
           pytest -q \
                  --cov=app \
-                 --cov-report=term-missing \
-                 --cov-report=xml \
-                 --cov-fail-under=70
+                 --cov-report=term \
+                 --cov-report=xml
 
-      - name: Upload coverage (artifact)
+      - name: Upload coverage (artifact, smoke uniquement)
         if: matrix.python-version == '3.13'
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-xml
+          name: coverage-xml-smoke
           path: coverage.xml
           retention-days: 14
 
   # ──────────────────────────────────────────────────────────────────────
-  # Job 3 — Intégration Qdrant (dense + BM25 + RRF, Py 3.13 uniquement)
+  # Job 3 — Suite complète + intégration Qdrant (Py 3.13, tous extras)
+  #
+  # Ce job est la « vérité » coverage du projet : il installe `[dev,vector,
+  # docling]`, lance TOUS les tests (y compris ceux qui requièrent docling /
+  # qdrant_client / sentence_transformers / fastembed), et applique le gate
+  # `--cov-fail-under=70`.
   # ──────────────────────────────────────────────────────────────────────
   tests-integration:
-    name: Integration Qdrant (Py 3.13)
+    name: Full suite + Qdrant integration (Py 3.13)
     needs: [tests-unit]
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -163,8 +172,11 @@ jobs:
           done
           echo "Qdrant didn't become healthy"; exit 1
 
-      - name: Pytest (intégration Qdrant — hybride + dense_only)
+      - name: Pytest (suite complète + Qdrant E2E + gate coverage 70%)
         env:
+          # ⚠️ Ces 2 vars n'affectent que les tests opt-in (`real_vector_backend`).
+          # Les autres tests sont basculés en `memory` par le fixture autouse
+          # `_isolate_vector_env` dans tests/conftest.py.
           ECRF_VECTOR_BACKEND: qdrant
           ECRF_QDRANT_URL: http://localhost:6333
           ECRF_QDRANT_COLLECTION_PREFIX: ecrf_chunks_citest
@@ -172,7 +184,16 @@ jobs:
           ECRF_ENABLE_RERANKER: "false"
           ECRF_RUN_QDRANT_INTEGRATION: "1"
         run: |
-          pytest -v \
-                 tests/test_qdrant_bootstrap.py \
-                 tests/test_qdrant_vector_service_unit.py \
-                 tests/test_qdrant_integration.py
+          pytest -q \
+                 --cov=app \
+                 --cov-report=term-missing \
+                 --cov-report=xml \
+                 --cov-fail-under=70
+
+      - name: Upload coverage (artifact, full suite)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-full
+          path: coverage.xml
+          retention-days: 14
