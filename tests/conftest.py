@@ -9,17 +9,25 @@ from tests.data_paths import CT_SCAN_REPORT_LIVER_PDF
 
 @pytest.fixture(autouse=True)
 def _isolate_vector_env(monkeypatch, request):
-    """Évite que `.env` (qui peut être en mode `qdrant`+BM25 pour le dev) ne
-    contamine les tests généralistes.
+    """Évite que `.env` local OU les variables CI ne contaminent les tests.
 
-    - Par défaut : `vector_backend=memory`, sparse BM25 / reranker désactivés.
+    Contexte :
+    - `.env` dev peut être en mode `qdrant`+BM25 (cf. README) ;
+    - en CI integration, on passe `ECRF_QDRANT_COLLECTION_PREFIX=ecrf_chunks_citest`
+      pour ne pas polluer une éventuelle collection prod, mais ça fuirait dans
+      les tests unitaires qui font `Settings()` sans prefix explicite.
+
+    - Par défaut : `vector_backend=memory`, sparse BM25 / reranker désactivés,
+      `qdrant_collection_prefix` forcé au défaut (`ecrf_chunks`).
     - Opt-in : un test marqué `@pytest.mark.real_vector_backend` (cas de
-      `test_qdrant_integration.py`) conserve ses propres `Settings(...)`."""
+      `test_qdrant_integration.py`) conserve ses propres `Settings(...)` et
+      les variables d'environnement CI."""
     if request.node.get_closest_marker("real_vector_backend"):
         return
     monkeypatch.setenv("ECRF_VECTOR_BACKEND", "memory")
     monkeypatch.setenv("ECRF_ENABLE_SPARSE_BM25", "false")
     monkeypatch.setenv("ECRF_ENABLE_RERANKER", "false")
+    monkeypatch.setenv("ECRF_QDRANT_COLLECTION_PREFIX", "ecrf_chunks")
 
 
 @pytest.fixture(scope="module")
