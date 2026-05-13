@@ -396,23 +396,170 @@ docker compose -f docker-compose.test.yml --profile integration up -d qdrant
 docker compose -f docker-compose.test.yml --profile integration run --rm test-integration
 ```
 
-### Triggers de release
+---
+
+## 11. Workflow Git — branche `main` protégée (Ruleset)
+
+> ⚠️ La branche `main` est protégée par un **GitHub Ruleset** ("Protect main") :
+> push direct interdit, force-push bloqué, suppression bloquée, PR obligatoire,
+> les 4 checks CI doivent être verts avant merge :
+> `Lint + type + audit`, `Unit tests (Py 3.12)`, `Unit tests (Py 3.13)`,
+> `Full suite + Qdrant integration (Py 3.13)`.
+>
+> Toute modification suit donc le cycle **branche → PR → CI verte → merge**.
+
+### 11.1 Cycle complet d'une modification
 
 ```powershell
-# Créer + pousser un tag versionné → déclenche release.yml
-git tag v0.1.0
+# 1) Récupérer le dernier main
+git checkout main
+git pull --ff-only origin main
+
+# 2) Créer une branche de travail (préfixes conseillés :
+#    feat/, fix/, docs/, chore/, refactor/, test/, ci/)
+git checkout -b fix/xyz
+
+# 3) Faire vos modifications, vérifier en local (mêmes outils que la CI)
+ruff check app tests scripts
+ruff format --check app tests scripts
+mypy app
+pytest -q
+
+# 4) Commit (pre-commit s'exécute si installé)
+git add .
+git commit -m "fix: description claire (impératif présent)"
+
+# 5) Push de la branche sur GitHub
+git push -u origin fix/xyz
+
+# 6) Ouvrir la PR depuis le terminal (titre = msg de commit, body = template)
+gh pr create --fill
+#  Variante : pousser un titre / body explicites
+gh pr create --title "fix: description" --body "Contexte + ce qui change + impact."
+
+# 7) Attendre que la CI passe (~7 min) — surveille en live
+gh pr checks --watch
+
+# 8) Merger en squash + suppression auto de la branche locale et distante
+gh pr merge --squash --delete-branch
+
+# 9) Resynchroniser main local
+git checkout main
+git pull --ff-only origin main
+```
+
+### 11.2 Variantes utiles
+
+```powershell
+# Voir l'état de la PR courante (numéro, checks, reviewers)
+gh pr status
+gh pr view                       # détails de la PR de la branche courante
+gh pr view --web                 # ouvrir dans le navigateur
+
+# Lister les PR ouvertes / fermées récentes
+gh pr list
+gh pr list --state closed --limit 10
+
+# Demander une review (si plusieurs collaborateurs)
+gh pr edit --add-reviewer "<user1>,<user2>"
+
+# Modifier le titre / body d'une PR
+gh pr edit --title "..." --body "..."
+
+# Forcer un re-run CI (parfois utile sur erreur réseau)
+gh run rerun --failed                # re-run uniquement les jobs failed
+gh run watch                         # suivre en live le run en cours
+```
+
+### 11.3 Diagnostiquer une CI rouge depuis le terminal
+
+```powershell
+# Liste des derniers runs (status + durée)
+gh run list --limit 5
+
+# Détails + jobs d'un run
+gh run view <run-id>
+
+# Logs des steps en échec (concis, va droit au but)
+gh run view <run-id> --log-failed
+
+# Logs complets d'un job précis
+gh run view <run-id> --job <job-id> --log
+
+# Annuler un run en cours (urgence)
+gh run cancel <run-id>
+```
+
+### 11.4 Erreurs fréquentes
+
+| Symptôme | Cause / Solution |
+|---|---|
+| `! [remote rejected] main -> main` lors d'un `git push` direct | Le Ruleset bloque le push direct sur `main`. **Passer par une PR** (workflow ci-dessus). |
+| `Merge not allowed because checks are required` | Au moins un check CI n'est pas vert. `gh pr checks` pour voir lequel. |
+| `Branch fix/xyz is out of date with main` | Le `main` distant a avancé. **Resync** : `git fetch origin && git rebase origin/main && git push --force-with-lease` (force-with-lease, pas `--force`). |
+| Le hook `mixed-line-ending` corrige `ci.yml` et bloque le commit | Pre-commit a réparé le fichier. Re-stage + re-commit : `git add . && git commit -m "..."`. |
+| Coup d'urgence : besoin de bypasser pre-commit | `git commit --no-verify -m "..."` (à éviter, déclenche un commit non-validé). |
+| Coup d'urgence : besoin de bypasser le Ruleset | Si vous êtes admin et avez activé "Bypass list" : possible via merge admin. Sinon impossible — c'est voulu. |
+
+### 11.5 Hotfix / annulation après merge
+
+```powershell
+# Inverser le merge d'une PR cassée (crée un commit de revert)
+gh pr view <pr-number>             # vérifier le numéro
+git checkout -b revert/<pr-number>
+git revert -m 1 <merge-commit-sha>
+git push -u origin revert/<pr-number>
+gh pr create --fill --title "revert: PR #<pr-number>"
+# … cycle PR + CI + merge habituel
+```
+
+### 11.6 Première release `v0.1.0`
+
+```powershell
+# Pré-requis : `main` à jour, CI verte sur le commit HEAD
+git checkout main
+git pull --ff-only origin main
+
+# Créer le tag annoté
+git tag v0.1.0 -m "v0.1.0 — initial release with Docling parsing + Qdrant hybrid RAG"
+
+# Pousser le tag sur le remote → déclenche .github/workflows/release.yml
 git push origin v0.1.0
 
-# Annuler un tag (avant push)
+# Suivre le run de release
+gh run watch
+
+# Vérifier que l'image GHCR est publiée
+gh api /user/packages/container/rapid-flow/versions | ConvertFrom-Json |
+    Select-Object name, @{n="tags";e={$_.metadata.container.tags}}
+```
+
+Après publication, l'image est tirable via :
+
+```powershell
+# Login GHCR (HTTPS, utilise le token gh)
+gh auth token | docker login ghcr.io -u sbenhadj --password-stdin
+
+# Pull
+docker pull ghcr.io/sbenhadj/rapid-flow:0.1.0
+docker pull ghcr.io/sbenhadj/rapid-flow:latest
+```
+
+### 11.7 Erreurs sur tag / release
+
+```powershell
+# Annuler un tag local (avant push)
 git tag -d v0.1.0
 
-# Supprimer côté distant
+# Supprimer un tag distant + release brouillon GHCR
 git push origin :refs/tags/v0.1.0
+gh release delete v0.1.0 --yes        # si une release GitHub a été créée
+gh api -X DELETE /user/packages/container/rapid-flow/versions/<version-id>
 ```
 
 ---
 
-## 11. Diagnostic rapide
+## 12. Diagnostic rapide
 
 ```powershell
 # Quels processus utilisent quel port ? (utile pour les 6333/6334 occupés)
