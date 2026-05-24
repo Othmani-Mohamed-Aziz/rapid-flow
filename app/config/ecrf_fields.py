@@ -1,8 +1,8 @@
 """
-Registry déclaratif des champs eCRF (exemples réels demandés).
+Champs eCRF exemple (bootstrap uniquement).
 
-En V1, ce module est la source de vérité ; une migration vers YAML/JSON
-peut réutiliser la structure `FieldDefinition`.
+Source de vérité runtime : `data/study_schema_default.json` (ou `ECRF_STUDY_SCHEMA_PATH`).
+Ce module sert à générer le JSON initial via `study_schema_from_example_fields()`.
 """
 
 from __future__ import annotations

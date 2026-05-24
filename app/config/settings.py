@@ -22,6 +22,20 @@ class Settings(BaseSettings):
     mock_llama_model_name: str = "mock-llama-lab-v1"
     mock_langextract_version: str = "langextract-mock-0.1"
 
+    # ─── Extraction imagerie (LangExtract + Ollama) ───────────────────────────
+    #: Active l'appel LangExtract/Ollama sur les chunks imagerie (sinon aucune obs. LLM).
+    langextract_enabled: bool = True
+    #: Modèle Ollama (`ollama pull <model>`). Ex. gemma2:2b, llama3.1:8b, mistral.
+    ollama_model_id: str = "gemma2:2b"
+    ollama_url: str = "http://localhost:11434"
+    ollama_timeout_s: int = 120
+    langextract_schema_version: str = "imaging-recist-langextract-v1"
+    #: Nombre max de chunks imagerie traités **en parallèle** par LangExtract/Ollama
+    #: (réduit la latence quand plusieurs hits RAG). `1` = séquentiel.
+    imaging_extraction_max_workers: int = 8
+    #: Chemin JSON du schéma d'étude. Vide = `data/study_schema_default.json` ou dérivé du code exemple.
+    study_schema_path: str | None = None
+
     #: `auto` = Docling si installé, sinon pypdf ; `docling` = Docling obligatoire ;
     #: `pypdf` = moteur texte léger uniquement.
     pdf_parser_backend: Literal["auto", "docling", "pypdf"] = "auto"
@@ -64,3 +78,42 @@ class Settings(BaseSettings):
     reranker_top_n: int = 5
     rerank_candidate_multiplier: int = 4  # top_k_final * multiplier candidats Qdrant
     reranker_device: Literal["cpu", "cuda", "auto"] = "auto"
+
+    # ─── Robustesse upsert / search ────────────────────────────────────────────
+    #: Taille max d'un batch Qdrant `upsert`. Au-delà, batching auto. Protège
+    #: contre les limites gRPC (msg size) et les timeouts sur gros documents.
+    upsert_batch_size: int = 256
+    #: Filtre `embedding_version == settings.embedding_version` injecté
+    #: automatiquement à chaque `search`. Désactiver UNIQUEMENT pendant une
+    #: migration où les deux versions doivent cohabiter.
+    enforce_embedding_version_filter: bool = True
+    #: Avant `upsert_chunks`, si des points existent déjà pour le document avec une
+    #: autre `embedding_version`, émettre un warning (ré-index / `delete_document`).
+    warn_on_embedding_version_mismatch: bool = True
+    #: Si True, refuse l'upsert tant que des points « ancienne version » coexistent
+    #: (garde-fou prod : évite mélange dense/sparse incompatible au search).
+    reject_embedding_version_mismatch_upsert: bool = False
+
+    # ─── Retrieval (écarts d’environnement) ───────────────────────────────────
+    #: Le reranker CrossEncoder et le sparse BM25 (fastembed) peuvent être absents
+    #: ou désactivés selon la plateforme (ex. Windows sans wheel) : les scores et
+    #: la latence diffèrent alors de la CI Linux. Voir logs au boot / health_check.
+
+    # ─── Robustesse réseau (retry / read-only) ─────────────────────────────────
+    #: Nombre de retries (en plus de la tentative initiale) sur les appels
+    #: Qdrant pour les erreurs transientes (timeout, 5xx, 429). 0 = pas de retry.
+    qdrant_max_retries: int = 3
+    #: Base du backoff exponentiel entre retries Qdrant : delay = base * 2**attempt.
+    #: Mettre à 0 dans les tests unitaires pour ne pas ralentir la suite.
+    qdrant_retry_backoff_base: float = 0.5
+    #: Mode lecture seule : si True, `upsert_chunks` et `delete_document` lèvent
+    #: une `RuntimeError`. `ensure_collection` ne tente pas de créer (suppose la
+    #: collection déjà bootstrappée). Utile pour un container API search-only.
+    qdrant_read_only: bool = False
+    #: Validation stricte du `tenant_id` : doit matcher `[A-Za-z0-9_-]{1,60}`,
+    #: sinon `ValueError`. Par défaut **False** (rétrocompat : normalisation
+    #: permissive qui substitue les caractères invalides par `_`). Activer
+    #: **fortement recommandé** en prod : évite des collisions silencieuses
+    #: entre tenants (ex: "STUDY 1" et "STUDY-1" qui normalisent en "STUDY_1"
+    #: et "STUDY-1" → tenants distincts par accident).
+    qdrant_strict_tenant_id: bool = False

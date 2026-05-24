@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -23,7 +23,7 @@ def _raw_pdf_stub() -> RawDocument:
         source_path=str(Path("__not_a_real_path__.pdf")),
         mime_type="application/pdf",
         content_bytes=b"%PDF-fake-bytes",
-        ingested_at=datetime.utcnow(),
+        ingested_at=datetime.now(timezone.utc),
     )
 
 
@@ -159,7 +159,7 @@ def test_smart_parsing_non_pdf_delegates_to_heuristic(tmp_path: Path) -> None:
         source_path=str(f),
         mime_type="text/plain",
         content_bytes=f.read_bytes(),
-        ingested_at=datetime.utcnow(),
+        ingested_at=datetime.now(timezone.utc),
     )
     parsed = SmartParsingService().parse(raw)
     assert "AST" in parsed.full_text

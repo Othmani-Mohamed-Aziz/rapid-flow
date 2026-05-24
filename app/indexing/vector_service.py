@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from app.indexing.retrieval_passage import passage_for_embedding_and_rerank
 from app.schemas.enums import FieldFamily
 from app.schemas.models import DocumentChunk
 
@@ -61,7 +62,7 @@ class InMemoryVectorIndexService(VectorIndexService):
         q = query_text.lower()
         scored: list[tuple[DocumentChunk, float]] = []
         for c in pool:
-            text = c.text.lower()
+            text = passage_for_embedding_and_rerank(c).lower()
             overlap = sum(1 for tok in q.split() if len(tok) > 2 and tok in text)
             score = min(1.0, 0.2 + 0.15 * overlap)
             scored.append((c, score))

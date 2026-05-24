@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.config.settings import Settings
 from app.parsing.base import ParsingService
+from app.parsing.document_type_scoring import classify_document_type
 from app.parsing.errors import DoclingNotInstalledError
 from app.parsing.heuristic_text import HeuristicTextParser
 from app.parsing.lab_detection import (
@@ -12,7 +13,7 @@ from app.parsing.lab_detection import (
 from app.parsing.lab_post_processor import LabReportPostProcessor
 from app.parsing.pdf.resilient import ensure_non_empty_text, parse_pdf_bytes_resilient
 from app.parsing.structuring import DocumentStructuringService
-from app.parsing.text_enrichment import extract_document_date, guess_document_type
+from app.parsing.text_enrichment import extract_document_date
 from app.schemas.models import ParsedDocument, RawDocument
 
 
@@ -83,12 +84,15 @@ class SmartParsingService(ParsingService):
 
         sample = pr.full_text[:18000] if pr.full_text else ""
 
+        cls = classify_document_type(pr.full_text, list(pr.sections), meta)
+        meta.update(cls.as_metadata())
+
         parsed = ParsedDocument(
             document_id=raw.document_id,
             patient_id=raw.patient_id,
             study_id=raw.study_id,
             full_text=pr.full_text,
-            document_type_hint=guess_document_type(pr.full_text, raw.mime_type),
+            document_type_hint=cls.document_type,
             document_date=extract_document_date(pr.full_text),
             metadata=meta,
             source_path=raw.source_path,

@@ -216,7 +216,10 @@ class SectionBasedChunkingService(ChunkingService):
 
                 md: dict[str, object] = {
                     "chunker": "SectionBasedChunkingService",
-                    "content_kind": "clinical_section",
+                    "content_kind": (sec.metadata or {}).get("content_kind")
+                    if (sec.metadata or {}).get("content_kind")
+                    in ("admin_section", "clinical_section")
+                    else "clinical_section",
                     "section_heading": sec.heading,
                     "section_index": sec_idx,
                     "part_index": part_i,

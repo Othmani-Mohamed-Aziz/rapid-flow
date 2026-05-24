@@ -53,26 +53,11 @@ def extract_document_date(text: str) -> date | None:
     return None
 
 
-def guess_document_type(text: str, mime: str) -> DocumentType:
-    lower = text.lower()
-    if any(
-        token in lower
-        for token in (
-            "bilan",
-            "nfs",
-            "hématologie",
-            "hematologie",
-            "plaquette",
-            "asat",
-            "ast",
-            "alat",
-            "biochimie",
-            "laboratoire",
-        )
-    ):
-        return DocumentType.LAB_BLOOD_PANEL
-    if "irm" in lower or "scanner" in lower or "recist" in lower:
-        return DocumentType.IMAGING_REPORT
-    if "antécédent" in lower or "comorbidit" in lower:
-        return DocumentType.CLINICAL_LETTER
-    return DocumentType.UNKNOWN
+def guess_document_type(text: str, mime: str) -> DocumentType:  # noqa: ARG001
+    """
+    API historique : sans sections ni métadonnées de parse, alignée sur le classifieur
+    multi-signaux avec **structure vide** (texte seul, rapide).
+    """
+    from app.parsing.document_type_scoring import classify_document_type
+
+    return classify_document_type(text, [], {}).document_type

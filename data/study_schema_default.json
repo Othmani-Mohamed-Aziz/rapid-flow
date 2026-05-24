@@ -1,0 +1,151 @@
+{
+  "study_id": "EXAMPLE",
+  "schema_version": "example-v1",
+  "family_retrieval_queries": {
+    "hematology": "hématologie hémogramme plaquettes leucocytes",
+    "coagulation": "coagulation INR TP TCA fibrinogène",
+    "hepatic_biochemistry": "bilan hépatique AST ALT GGT bilirubine",
+    "inflammation_biomarkers": "inflammation CRP biomarqueurs AFP",
+    "comorbidities": "antécédents comorbidités cirrhose traitements",
+    "imaging_recist": "RECIST réponse tumorale cible non cible progression stabilité scanner TDM IRM mesure lésion millimètres mm"
+  },
+  "fields": [
+    {
+      "field_name": "AFP_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "lab_blood_panel"
+      ],
+      "extraction_family": "lab_values",
+      "field_family": "inflammation_biomarkers",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_mg_l_or_ug_l",
+      "target_column": "AFP_start_AtezoBev_D0",
+      "autofill_threshold": 0.7,
+      "canonical_key": "AFP",
+      "extraction_strategy": "lab_deterministic",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "AST_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "lab_blood_panel"
+      ],
+      "extraction_family": "lab_values",
+      "field_family": "hepatic_biochemistry",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_u_l",
+      "target_column": "AST_start_AtezoBev_D0",
+      "autofill_threshold": 0.65,
+      "canonical_key": "AST",
+      "extraction_strategy": "lab_deterministic",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "ALT_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "lab_blood_panel"
+      ],
+      "extraction_family": "lab_values",
+      "field_family": "hepatic_biochemistry",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_u_l",
+      "target_column": "ALT_start_AtezoBev_D0",
+      "autofill_threshold": 0.65,
+      "canonical_key": "ALT",
+      "extraction_strategy": "lab_deterministic",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "Total_bilirubine_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "lab_blood_panel"
+      ],
+      "extraction_family": "lab_values",
+      "field_family": "hepatic_biochemistry",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_umol_l",
+      "target_column": "Total_bilirubine_D0",
+      "autofill_threshold": 0.65,
+      "canonical_key": "Total_bilirubine",
+      "extraction_strategy": "lab_deterministic",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "PLT_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "lab_blood_panel"
+      ],
+      "extraction_family": "lab_values",
+      "field_family": "hematology",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_g_l",
+      "target_column": "PLT_start_AtezoBev_D0",
+      "autofill_threshold": 0.65,
+      "canonical_key": "PLT",
+      "extraction_strategy": "lab_deterministic",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "Cirrhosis",
+      "field_type": "boolean",
+      "document_types_allowed": [
+        "clinical_letter",
+        "lab_blood_panel"
+      ],
+      "extraction_family": "narrative_clinical",
+      "field_family": "comorbidities",
+      "temporal_scope": "unspecified",
+      "normalization_rule": "bool_yes_no",
+      "target_column": "Cirrhosis",
+      "autofill_threshold": 0.75,
+      "canonical_key": "Cirrhosis",
+      "extraction_strategy": "narrative_keywords",
+      "langextract_class": null,
+      "retrieval_query": null
+    },
+    {
+      "field_name": "Size_major_nodule_mm_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": [
+        "imaging_report"
+      ],
+      "extraction_family": "imaging_recist",
+      "field_family": "imaging_recist",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_mm",
+      "target_column": "Size_major_nodule_mm_start_AtezoBev_D0",
+      "autofill_threshold": 0.7,
+      "canonical_key": "Size_major_nodule_mm",
+      "extraction_strategy": "imaging_langextract",
+      "langextract_class": "lesion_size_mm",
+      "retrieval_query": null
+    },
+    {
+      "field_name": "Response_at_first_imaging_RECIST",
+      "field_type": "categorical",
+      "document_types_allowed": [
+        "imaging_report"
+      ],
+      "extraction_family": "imaging_recist",
+      "field_family": "imaging_recist",
+      "temporal_scope": "first_imaging",
+      "normalization_rule": "recist_category",
+      "target_column": "Response_at_first_imaging_RECIST",
+      "autofill_threshold": 0.75,
+      "canonical_key": "RECIST_response",
+      "extraction_strategy": "imaging_langextract",
+      "langextract_class": "recist_response",
+      "retrieval_query": null
+    }
+  ]
+}

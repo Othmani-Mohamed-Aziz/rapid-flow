@@ -8,13 +8,40 @@ Pipeline **orientée routing, extraction spécialisée par famille de champs et 
 
 ## Architecture
 
+### Pipeline global
+
+```mermaid
+flowchart LR
+  DOC["Document<br/>(PDF, TXT…)"] --> ING["Ingestion"]
+  ING --> PAR["Parsing<br/>pypdf | Docling"]
+  PAR --> STR["Structuring<br/>sections lab"]
+  STR --> CHK["Chunking<br/>sections | lab"]
+  CHK --> IDX["Indexation<br/>memory | Qdrant"]
+  IDX --> RET["Retrieval<br/>dense + BM25 + rerank"]
+  RET --> EXT["Extraction<br/>StudySchema"]
+  EXT --> BR["Règles métier<br/>mapping · norm · score"]
+  BR --> ETL["ETL<br/>JSON · CSV mock"]
+
+  style EXT fill:#e8f4fc,stroke:#1a73e8
+  style BR fill:#fef7e0,stroke:#f9ab00
 ```
-ingestion ─► parsing ─► structuring ─► chunking ─► indexing ─► retrieval ─► extraction ─► business_rules ─► etl
-            (PDF: pypdf | docling)   │           │ (memory | Qdrant)
-                                     │           └─ embeddings dense (e5)
-                                     │              + sparse BM25
-                                     │              + reranker BGE
-                                     └─ section-based ou heuristique lab
+
+### Démarche par document (orchestration)
+
+```mermaid
+flowchart TB
+  START(["run_pipeline(path, study_id)"]) --> LOAD["Charger StudySchema<br/>ECRF_STUDY_SCHEMA_PATH"]
+  LOAD --> PARSE["Parser + router<br/>→ DocumentType"]
+  PARSE --> CHUNK["Découper en chunks<br/>char_start / char_end"]
+  CHUNK --> INDEX["Upsert index vectoriel<br/>tenant = study_id"]
+  INDEX --> PLAN["plan_extraction_jobs(doc_type)"]
+  PLAN --> RAG["Retrieval par field_family<br/>des jobs actifs"]
+  RAG --> EXTRACT["ExtractionService<br/>par chunk RAG"]
+  EXTRACT --> CAND["build_candidates<br/>mapping + normalisation"]
+  CAND --> VALID["Validation + seuils autofill"]
+  VALID --> OUT(["pipeline_output.json<br/>pipeline_output_ecrf_mock.csv"])
+
+  LOAD -.->|warning si mismatch| PARSE
 ```
 
 - **Ingestion / parsing / chunking** : `app/ingestion`, `app/parsing` (`SmartParsingService`, PDF via **pypdf** ou **Docling**, post-traitement labo via `LabReportPostProcessor`).
@@ -22,12 +49,12 @@ ingestion ─► parsing ─► structuring ─► chunking ─► indexing ─�
 - **Chunking** : `SectionBasedChunkingService` (sections cliniques) ou `HeuristicLabChunkingService` (paragraphes labo). Span verification (`char_start`/`char_end`) garantie pour la traçabilité.
 - **Routage documentaire** : `app/routing` (`DocumentRouter`).
 - **Index / retrieval** : `app/indexing` (`InMemoryVectorIndexService` pour dev, `QdrantHybridVectorService` pour prod), `app/retrieval` (`RetrievalService`, orchestrateurs de workflow).
-- **Extraction** : `app/extraction` (`LangExtractExtractor`, `LlamaExtractor`, `ExtractionService`) — sous-textes seulement.
+- **Extraction** : `app/extraction` — pilotée par `StudySchema` (JSON) : jobs par stratégie/famille, chunks RAG uniquement (`ExtractionService`, `plan_extraction_jobs`, stratégies lab / narratif / imagerie LangExtract+Ollama).
 - **Règles métier** : `app/business_rules` (temporalité, mapping champs, validation, score).
 - **ETL sortie** : `app/etl` (JSON + CSV mock ; XLS prévu).
 - **Orchestration** : `app/orchestration/pipeline.py` (`run_pipeline`).
-- **Schémas** : `app/schemas` (Pydantic v2).
-- **Registry champs** : `app/config/ecrf_fields.py` + `FieldRegistry`.
+- **Schémas** : `app/schemas` (Pydantic v2), dont `StudySchema` + `ExtractionCatalog`.
+- **Schéma d'étude** : `data/study_schema_default.json` (ou `ECRF_STUDY_SCHEMA_PATH`) ; `app/config/ecrf_fields.py` sert au bootstrap / démo uniquement.
 
 Workflow documentaire :
 
@@ -101,12 +128,7 @@ pre-commit run --all-files   # premier check sur tout le repo
 - **Chunking** : `SectionBasedChunkingService` (sections cliniques) — taille max `ECRF_CHUNK_MAX_SECTION_CHARS` (défaut 12 000 caractères). Pour bilans sanguins : `HeuristicLabChunkingService`.
 - **Post-traitement labo** : `LabReportPostProcessor` remplit `structured_lab_lines` pour les PDF « bilan » détectés (scoring contextuel par `is_probable_lab_document`).
 
-### Démo parsing seul
-
-```powershell
-python scripts\run_pdf_demo.py "chemin\vers\rapport.pdf"
-python scripts\run_pdf_demo.py "chemin\vers\rapport.pdf" --backend pypdf --json-out parsed.json
-```
+Voir [Scripts de démo (par étape pipeline)](#scripts-de-démo-par-étape-pipeline) pour `run_demo_parsing.py`.
 
 ---
 
@@ -139,23 +161,401 @@ Une **collection par tenant** (option C) : nom = `{ECRF_QDRANT_COLLECTION_PREFIX
 
 ### Recherche hybride
 
-```
-query
-  │
-  ├─► e5 (dense, cosine)  ┐
-  │                        ├─► RRF fusion (Qdrant native) ─► top-K ─► [reranker BGE] ─► résultats
-  └─► BM25 (sparse)       ┘
+```mermaid
+flowchart LR
+  Q["Requête texte<br/>family_retrieval_queries"] --> E5["Embedding dense e5"]
+  Q --> BM25["Sparse BM25"]
+  E5 --> RRF["Fusion RRF<br/>Qdrant"]
+  BM25 --> RRF
+  RRF --> TOP["Top-K candidats"]
+  TOP --> RERANK{"ECRF_ENABLE_RERANKER ?"}
+  RERANK -->|oui| BGE["Reranker BGE"]
+  RERANK -->|non| OUT["RetrievalHit[]"]
+  BGE --> OUT
 ```
 
 ---
 
-## Lancer la V1 (démo bilan sanguin)
+## Scripts de démo (par étape pipeline)
 
-```powershell
-python scripts\run_local_demo.py
+Trois scripts couvrent **des tranches différentes** de la chaîne. Seul `run_demo_e2e.py` exécute la pipeline **métier complète** (`PipelineOrchestrator`).
+
+```mermaid
+flowchart LR
+  ING["Ingestion"] --> PAR["Parsing"]
+  PAR --> CHK["Chunking"]
+  CHK --> IDX["Indexation"]
+  IDX --> RET["Retrieval"]
+  RET --> EXT["Extraction"]
+  EXT --> BR["Règles métier"]
+  BR --> OUT["Export eCRF"]
+
+  subgraph parsing["run_demo_parsing.py"]
+    P1["Ingestion"] --> P2["Parsing"] --> P3["Chunking"]
+  end
+
+  subgraph retrieval["run_demo_retrieval.py"]
+    R1["Ingestion"] --> R2["Parsing"] --> R3["Chunking"]
+    R3 --> R4["Index Qdrant"] --> R5["Retrieval debug"]
+  end
+
+  subgraph e2e["run_demo_e2e.py"]
+    E1["run_pipeline()"] --> E2["… tout …"] --> E3["Export CSV/JSON"]
+  end
+
+  style EXT fill:#e8f4fc,stroke:#1a73e8
+  style OUT fill:#e6f4ea,stroke:#137333
 ```
 
-Sorties dans `outputs/<document_id>/` : `pipeline_output.json` et `pipeline_output_ecrf_mock.csv`.
+| Script | Étapes couvertes | Extraction | Prérequis | Entrée par défaut |
+|--------|------------------|------------|-----------|-------------------|
+| **`run_demo_parsing.py`** | ingestion → parsing → chunking | Non | Python + deps parsing | PDF/TXT (argument) |
+| **`run_demo_retrieval.py`** | + index Qdrant hybride + retrieval + dumps JSON | Non | Qdrant + modèles HF (~1,5 Go) | `data/ct_scan_report_liver.pdf` |
+| **`run_demo_e2e.py`** | pipeline produit complète via `run_pipeline()` | **Oui** (lab + imagerie) | deps de base ; Ollama pour RECIST ; Qdrant si `ECRF_VECTOR_BACKEND=qdrant` | `mock_blood_panel.txt` + `data/ct_scan_report_liver.pdf` |
+
+### `run_demo_parsing.py` — parsing seul
+
+Déboguer Docling/pypdf, sections, `document_type_hint`, lignes labo structurées — **sans** Qdrant ni LLM.
+
+```powershell
+python scripts\run_demo_parsing.py "data\ct_scan_report_liver.pdf"
+python scripts\run_demo_parsing.py "data\ct_scan_report_liver.pdf" --backend pypdf --json-out parsed.json
+```
+
+### `run_demo_retrieval.py` — index + retrieval (sans extraction)
+
+Valider la couche RAG sur un PDF imagerie : upsert Qdrant, scores dense/BM25/rerank, `health_check`, `list_chunks`, artefacts JSON (`--dump-dir`). **Ne passe pas** par `PipelineOrchestrator` (pas d'extraction, pas d'export eCRF).
+
+```powershell
+docker compose -f docker-compose.qdrant.yml up -d
+python scripts\run_demo_retrieval.py
+python scripts\run_demo_retrieval.py --dump-dir outputs\demo_ct --dump-full-text
+python scripts\run_demo_retrieval.py --no-sparse --no-reranker --keep-indexed
+```
+
+### `run_demo_e2e.py` — pipeline produit complète
+
+Appelle `run_pipeline()` sur **deux documents** :
+
+1. **`scripts/sample_data/mock_blood_panel.txt`** — extraction `lab_deterministic` (AST, ALT, AFP, …)
+2. **`data/ct_scan_report_liver.pdf`** — extraction `imaging_langextract` (taille lésion, RECIST) via Ollama
+
+Sorties : un dossier `outputs/<document_id>/` par document (`pipeline_output.json` + CSV mock).
+
+```powershell
+python scripts\run_demo_e2e.py
+python scripts\run_demo_e2e.py --lab-only          # sans imagerie / sans Ollama
+python scripts\run_demo_e2e.py --imaging-only      # CR TDM seul
+```
+
+Prérequis imagerie : `ECRF_LANGEXTRACT_ENABLED=true`, `ollama serve`, `ollama pull gemma2:2b` (ou modèle `.env`).
+
+PDF imagerie seul (sans le script) :
+
+```powershell
+python -c "from app.config.settings import Settings; from app.config.study_schema_provider import resolve_study_schema; from app.orchestration.pipeline import run_pipeline; s=resolve_study_schema(Settings().study_schema_path); print(run_pipeline('data/ct_scan_report_liver.pdf', 'PAT-1', s.study_id).export_paths)"
+```
+
+### Quel script choisir ?
+
+| Besoin | Script |
+|--------|--------|
+| « Mon PDF est-il bien parsé ? » | `run_demo_parsing.py` |
+| « Qdrant retrouve-t-il les bonnes sections ? » | `run_demo_retrieval.py` |
+| « Le pipeline remplit-il les champs eCRF ? » | `run_demo_e2e.py` |
+
+> **`run_demo_e2e.py` ≠ `run_demo_retrieval.py` + extraction.** L'e2e utilise `PipelineOrchestrator` (retrieval piloté par le StudySchema, pas les requêtes ad hoc du script retrieval). Le script retrieval ajoute des outils de debug Qdrant absents de l'e2e (`health_check`, `list_chunks`, dumps JSON).
+
+### Via Docker (`docker-compose.dev.yml`)
+
+Alternative au venv local — recommandée pour **`run_demo_retrieval.py`** et la stack Qdrant hybride sur Windows. Image `rapid-flow:dev` (target `test` : Python 3.13 Linux, extras `[vector]` + `[docling]`).
+
+```mermaid
+flowchart TB
+  HOST["Hôte<br/>code/ outputs/ data/"]
+  APP["service: app"]
+  QD["service: qdrant :6533"]
+  OL["service: ollama<br/>profile imaging"]
+
+  HOST -->|bind mounts| APP
+  APP -->|ECRF_QDRANT_URL| QD
+  APP -.->|host.docker.internal:11434| HOST
+  APP -->|profile imaging| OL
+```
+
+| Service | Rôle |
+|---------|------|
+| **`qdrant`** | Index vectoriel (ports hôte 6533/6534) |
+| **`app`** | Conteneur de dev : code monté live, cache HF persistant |
+| **`ollama`** (profile `imaging`) | LLM conteneurisé pour extraction imagerie |
+
+**Build (une fois, ~5 Go) :**
+
+```powershell
+docker compose -f docker-compose.dev.yml build app
+```
+
+**Commandes :**
+
+```powershell
+# Qdrant (retrieval / e2e avec vector backend)
+docker compose -f docker-compose.dev.yml up -d qdrant
+
+# 1. Parsing seul — sans démarrer Qdrant
+docker compose -f docker-compose.dev.yml run --rm --no-deps app `
+  python scripts/run_demo_parsing.py data/ct_scan_report_liver.pdf
+
+# 2. Retrieval hybride
+docker compose -f docker-compose.dev.yml run --rm app `
+  python scripts/run_demo_retrieval.py --dump-dir outputs/demo_ct --dump-full-text
+
+# 3. Pipeline e2e (memory, sans Qdrant)
+docker compose -f docker-compose.dev.yml run --rm --no-deps app `
+  python scripts/run_demo_e2e.py
+
+# 4. Pipeline e2e + Qdrant (ECRF_VECTOR_BACKEND=qdrant dans le compose)
+docker compose -f docker-compose.dev.yml run --rm app `
+  python scripts/run_demo_e2e.py
+
+# Shell interactif
+docker compose -f docker-compose.dev.yml run --rm app bash
+```
+
+**Ollama (extraction imagerie RECIST) :**
+
+- Ollama sur l’hôte (défaut) : `ollama serve` + `ollama pull gemma2:2b` — le conteneur utilise `http://host.docker.internal:11434`.
+- Ollama conteneurisé :
+
+```powershell
+docker compose -f docker-compose.dev.yml --profile imaging up -d ollama
+docker compose -f docker-compose.dev.yml run --rm -e ECRF_OLLAMA_URL=http://ollama:11434 app `
+  python scripts/run_demo_e2e.py
+```
+
+Volumes partagés : cache HF (`rapid_flow_hf_cache`, réutilisable avec `docker-compose.test.yml`), `outputs/` et `data/` sur l’hôte.
+
+---
+
+## Extraction (StudySchema)
+
+L'extraction ne lit **jamais** le document entier en une fois : elle consomme les **chunks** renvoyés par le retrieval, avec traçabilité (`source_chunk_id`, score RAG, span texte).
+
+### Flux extraction (vue d'ensemble)
+
+```mermaid
+flowchart TB
+  JSON["StudySchema JSON<br/>fields + extraction_catalog"] --> RESOLVE["resolve_study_schema()"]
+  RESOLVE --> FIELDS["Champs extractibles<br/>pour doc_type"]
+  FIELDS --> PLAN["plan_extraction_jobs()"]
+  PLAN --> JOBS["ExtractionJob[]<br/>stratégie × field_family"]
+
+  JOBS --> RET["RetrievalService<br/>requêtes par famille"]
+  RET --> HITS["RetrievalHit[]<br/>texte chunk + score"]
+
+  HITS --> SVC["ExtractionService.extract_all_for_document()"]
+
+  SVC --> LAB["lab_deterministic"]
+  SVC --> NAR["narrative_keywords"]
+  SVC --> IMG["imaging_langextract"]
+
+  LAB --> OBS["ExtractedObservation[]"]
+  NAR --> OBS
+  IMG --> OBS
+
+  OBS --> MAP["FieldMapper<br/>canonical_key → colonne eCRF"]
+  MAP --> NORM["normalization_rule<br/>RECIST, unités, bool"]
+  NORM --> TEMP["field_resolution<br/>temporal_scope"]
+  TEMP --> FC["FieldCandidate[]"]
+```
+
+### Planification des jobs
+
+Les champs du schéma sont **regroupés** : un job = une paire `(extraction_strategy, field_family)` partageant les mêmes hits RAG.
+
+```mermaid
+flowchart LR
+  subgraph fields["Champs actifs (ex. bilan labo)"]
+    F1["AST<br/>hepatic_biochemistry"]
+    F2["ALT<br/>hepatic_biochemistry"]
+    F3["AFP<br/>inflammation_biomarkers"]
+    F4["Cirrhosis<br/>comorbidities"]
+  end
+
+  F1 --> J1
+  F2 --> J1
+  F3 --> J2
+  F4 --> J3
+
+  J1["Job lab_deterministic<br/>+ hepatic_biochemistry"]
+  J2["Job lab_deterministic<br/>+ inflammation_biomarkers"]
+  J3["Job narrative_keywords<br/>+ comorbidities"]
+
+  J1 --> R1["Requête RAG<br/>family_retrieval_queries"]
+  J2 --> R2["Requête RAG<br/>family_retrieval_queries"]
+  J3 --> R3["Requête RAG<br/>family_retrieval_queries"]
+```
+
+### Choix de stratégie
+
+```mermaid
+flowchart TD
+  FD["StudyFieldDefinition"] --> STRAT{"extraction_strategy<br/>déclarée ?"}
+  STRAT -->|oui| USE["Utiliser la stratégie explicite"]
+  STRAT -->|non| FAM{"extraction_family"}
+  FAM -->|lab_values| LAB["lab_deterministic"]
+  FAM -->|narrative_clinical| NAR["narrative_keywords"]
+  FAM -->|imaging_recist| IMG["imaging_langextract"]
+  FAM -->|autre| NONE["none — ignoré"]
+
+  USE --> RUN["ExtractorRegistry.get()"]
+  LAB --> RUN
+  NAR --> RUN
+  IMG --> RUN
+```
+
+### Traitement d'un chunk (séquence)
+
+```mermaid
+sequenceDiagram
+  participant P as pipeline.py
+  participant R as RetrievalService
+  participant S as ExtractionService
+  participant E as Stratégie extracteur
+  participant M as FieldMapper
+
+  P->>P: plan_extraction_jobs(doc_type)
+  loop par ExtractionJob
+    P->>R: search(field_family, query)
+    R-->>P: RetrievalHit[]
+    loop par hit (chunk texte)
+      P->>S: extract_for_job(job, hits)
+      S->>E: extract_chunk(text, job, chunk_id, score)
+      E-->>S: ExtractedObservation[]
+    end
+    S->>S: dédup par colonne cible
+  end
+  P->>M: build_candidates(observations)
+  M->>M: canonical_key + temporal_scope
+  M-->>P: FieldCandidate[]
+```
+
+### Imagerie : parallélisation LangExtract
+
+```mermaid
+flowchart TB
+  JOB["Job imaging_langextract<br/>langextract_classes dérivées du schéma"] --> HITS["N hits RAG"]
+  HITS --> CHECK{"workers > 1<br/>et N > 1 ?"}
+  CHECK -->|non| SEQ["Boucle séquentielle<br/>extract_chunk"]
+  CHECK -->|oui| POOL["ThreadPoolExecutor<br/>ECRF_IMAGING_EXTRACTION_MAX_WORKERS"]
+  POOL --> LX["run_imaging_langextract<br/>Ollama via LangExtract"]
+  SEQ --> LX
+  LX --> OBS["Observations IMAGING_RECIST<br/>+ score retrieval blend"]
+  OBS --> DEDUP["Dédup EcrfCellUpdate<br/>par target_column"]
+```
+
+### Schéma d'étude (`StudySchema`)
+
+Fichier par défaut : [`data/study_schema_default.json`](./data/study_schema_default.json).
+
+Chaque champ actif déclare notamment :
+
+| Propriété | Rôle |
+|-----------|------|
+| `canonical_key` | Clé d'observation (ex. `AST`, `RECIST_response`) |
+| `extraction_strategy` | `lab_deterministic`, `narrative_keywords`, `imaging_langextract` |
+| `field_family` | Famille retrieval + dédup (ex. `hepatic_biochemistry`, `imaging_recist`) |
+| `document_types_allowed` | Types de documents éligibles |
+| `temporal_scope` | Désambiguïsation si plusieurs colonnes partagent une clé |
+| `normalization_rule` | Règle métier (ex. `recist_category`, `numeric_mm`) |
+| `langextract_class` | Classe LangExtract pour l'imagerie (optionnel) |
+
+Le bloc optionnel `extraction_catalog` dans le JSON permet d'étendre sans recompiler :
+
+- `lab_analytes` — patterns regex par analyte (`LabAnalyteSpec`)
+- `narrative_keywords` — mots-clés booléens / catégoriels (`NarrativeKeywordSpec`)
+- `langextract_class_map` / `langextract_class_descriptions` — classes imagerie custom
+
+Chargement : `app/config/study_schema_provider.py` (`resolve_study_schema`). Si `ECRF_STUDY_SCHEMA_PATH` est vide, le fichier `data/study_schema_default.json` est utilisé ; sinon repli sur les champs exemple de `ecrf_fields.py`.
+
+### Stratégies d'extracteurs
+
+| Stratégie | Module | Usage |
+|-----------|--------|--------|
+| `lab_deterministic` | `strategy_extractors.LabDeterministicStrategy`, `lab_heuristics.py` | Bilans : AST, AFP, plaquettes, etc. |
+| `narrative_keywords` | `NarrativeKeywordsStrategy` | Comorbidités, antécédents (ex. cirrhose) |
+| `imaging_langextract` | `ImagingLangextractStrategy`, `imaging_langextract.py` | RECIST, tailles en mm, conclusions radiologiques |
+
+Registre : `ExtractorRegistry` dans `app/extraction/strategy_extractors.py`. Orchestration : `app/extraction/service.py` (dédup par colonne cible, parallélisation imagerie via `ThreadPoolExecutor`).
+
+Classes LangExtract par défaut : `lesion_size_mm`, `recist_response`, `lesion_description`, `imaging_conclusion` (dérivée si le schéma demande `RECIST_response`). Normalisation RECIST → codes canoniques `CR|PR|SD|PD|NE` (`app/business_rules/normalization.py`).
+
+### Imagerie : Ollama + LangExtract
+
+Prérequis pour l'extraction imagerie **réelle** (hors tests mockés) :
+
+```powershell
+# Ollama local
+ollama pull gemma2:2b    # ou le modèle défini dans .env
+ollama serve
+pip install langextract   # si absent du venv
+```
+
+Variables `.env` (préfixe `ECRF_`, voir `.env.example`) :
+
+```ini
+ECRF_LANGEXTRACT_ENABLED=true
+ECRF_OLLAMA_MODEL_ID=gemma2:2b
+ECRF_OLLAMA_URL=http://localhost:11434
+ECRF_OLLAMA_TIMEOUT_S=120
+ECRF_IMAGING_EXTRACTION_MAX_WORKERS=8
+ECRF_STUDY_SCHEMA_PATH=./data/study_schema_default.json
+ECRF_LANGEXTRACT_SCHEMA_VERSION=imaging-recist-langextract-v1
+```
+
+`ECRF_LANGEXTRACT_ENABLED=false` désactive les appels Ollama (aucune observation LLM imagerie).
+
+### Règles métier post-extraction
+
+- **Mapping** : `app/business_rules/mapping.py` — résolution champ eCRF via `canonical_key` + type de document.
+- **Temporalité** : `app/business_rules/field_resolution.py` — priorité de `temporal_scope` (ex. baseline lab, `first_imaging` pour RECIST).
+- **Normalisation** : `app/business_rules/normalization.py` — unités, booléens, catégories RECIST.
+
+Le pipeline (`app/orchestration/pipeline.py`) charge le schéma, planifie les jobs, restreint le retrieval aux familles concernées, puis appelle `extract_all_for_document`.
+
+### Personnaliser une étude
+
+```mermaid
+flowchart LR
+  A["Copier study_schema_default.json"] --> B["Éditer fields +<br/>family_retrieval_queries"]
+  B --> C{"Catalogue custom ?"}
+  C -->|oui| D["Ajouter extraction_catalog<br/>lab · narratif · LangExtract"]
+  C -->|non| E["ECRF_STUDY_SCHEMA_PATH"]
+  D --> E
+  E --> F["run_pipeline(..., study_id=<id>)"]
+  F --> G{"study_id == schema.study_id ?"}
+  G -->|oui| OK["Pipeline OK"]
+  G -->|non| WARN["Warning log<br/>continuer quand même"]
+```
+
+1. Copier `data/study_schema_default.json` vers `data/study_schema_<study_id>.json`.
+2. Ajuster `fields`, `family_retrieval_queries` et éventuellement `extraction_catalog`.
+3. Pointer `ECRF_STUDY_SCHEMA_PATH` vers ce fichier et aligner `study_id` passé à `run_pipeline` avec `study_schema.study_id` (warning si divergence).
+
+Adaptateur **XLS/CSV** (`MA_Base_example.xlsx` → JSON) : prévu ; non branché en V1.
+
+### Fichiers clés
+
+```
+app/schemas/study_schema.py          # StudySchema, ExtractionJob, stratégies
+app/schemas/extraction_catalog.py    # catalogue lab / narratif / LangExtract
+app/config/study_schema_provider.py
+app/extraction/planner.py
+app/extraction/service.py
+app/extraction/strategy_extractors.py
+app/extraction/imaging_langextract.py
+app/extraction/imaging_config.py
+data/study_schema_default.json
+```
 
 ---
 
@@ -176,6 +576,44 @@ pytest -v -rs
 # Par marker
 pytest -m ct_integration_pdf
 pytest -m real_vector_backend
+```
+
+### Tests extraction (unitaires + intégration)
+
+Sous PowerShell, les globs `tests/test_extraction_*.py` ne sont **pas** développés par pytest — utiliser l'une des commandes suivantes :
+
+```powershell
+# Tous les tests dont le nom contient "extraction" (+ schéma / imagerie)
+python -m pytest tests/ -k "extraction or study_schema_extraction or imaging_langextract" -q
+
+# Liste explicite des fichiers extraction
+python -m pytest @(Get-ChildItem tests\test_extraction_*.py).FullName tests\test_study_schema_extraction.py tests\test_imaging_langextract.py -q
+
+# Intégration pipeline extraction seule (LangExtract mocké pour l'imagerie)
+python -m pytest tests\test_extraction_integration.py -q
+```
+
+Fichiers principaux :
+
+| Fichier | Couverture |
+|---------|------------|
+| `test_extraction_catalog_and_schema.py` | Validation JSON, catalogue |
+| `test_extraction_planner.py` | Planification des jobs |
+| `test_extraction_lab_and_narrative.py` | Heuristiques lab / narratif |
+| `test_extraction_normalization.py` | RECIST, unités |
+| `test_extraction_field_resolution.py` | Scopes temporels |
+| `test_extraction_mapping_dynamic.py` | Mapping dynamique |
+| `test_extraction_imaging_config.py` | Config LangExtract par job |
+| `test_extraction_service_unit.py` | Orchestration service |
+| `test_extraction_strategies_unit.py` | Stratégies isolées |
+| `test_extraction_integration.py` | E2E lab + imagerie (mock) |
+| `test_imaging_langextract.py` | Parsing LangExtract / RECIST |
+| `tests/extraction_fixtures.py` | Helpers partagés |
+
+Test **réel** Ollama sur PDF CT (lent, opt-in) :
+
+```powershell
+python -m pytest tests\test_ct_scan_report_integration.py -v
 ```
 
 ### Tests d'intégration Qdrant (opt-in)
@@ -248,8 +686,9 @@ Reproduire en local : voir [`useful_commands.md`](./useful_commands.md#10-ci-git
 | Brique | Emplacement | Action suivante |
 |--------|-------------|-----------------|
 | **RAGFlow** | `app/retrieval/workflow_orchestrator.py` → `RagflowWorkflowOrchestrator` | Implémenter appels HTTP/SDK ; mapper JSON → `RetrievalHit`. |
-| **LangExtract** | `app/extraction/langextract_extractor.py` | Remplacer la branche mock par l'API LangExtract ; conserver `extract(text, schema, context=...)`. |
-| **Llama fine-tuné** | `app/extraction/llama_extractor.py` | Charger le modèle (vLLM, llama.cpp, HF) ; prompts **courts** par `FieldFamily`. |
+| **LangExtract imagerie** | `app/extraction/imaging_langextract.py` | Branché (Ollama) pour RECIST / tailles ; étendre via `extraction_catalog` dans le JSON d'étude. |
+| **Llama fine-tuné** | `app/extraction/llama_extractor.py` | Injecté mais non utilisé par les stratégies V1 ; brancher si besoin hors LangExtract. |
+| **StudySchema XLS** | `data/MA_Base_example.xlsx` | Générer `study_schema.json` depuis la base MA (adaptateur à implémenter). |
 | **LlamaIndex layer** | extra `[llamaindex]` | `VectorStoreIndex` + `QdrantVectorStore` ; filtres metadata (`document_id`, `field_family`). Optionnel : la couche bas-niveau (`QdrantHybridVectorService`) suffit déjà. |
 | **XLS réel** | `app/etl/export.py` | Implémenter `XlsExportPlaceholder` avec `openpyxl`. |
 | **Pseudonymisation HDS** | TODO | Hooks pré-indexation pour anonymiser les identifiants nominatifs. |
@@ -285,7 +724,7 @@ app/
     pdf/
   indexing/          # InMemory + QdrantHybridVectorService + embeddings + sparse + reranker
   retrieval/
-  extraction/
+  extraction/        # planner, service, strategy_extractors, imaging_langextract
   routing/
   business_rules/
   etl/
@@ -294,12 +733,14 @@ app/
   config/
   utils/
   orchestration/
-tests/
-scripts/             # demos + prefetch_vector_models.py
+tests/               # test_extraction_*.py, extraction_fixtures.py
+scripts/             # run_demo_parsing | run_demo_retrieval | run_demo_e2e + prefetch_vector_models.py
+data/                # study_schema_default.json, PDF/TXT démo
 docs/
 .github/
   workflows/         # ci.yml + release.yml
 Dockerfile           # multi-stages: base / runtime / vector / test
 docker-compose.qdrant.yml   # Qdrant local seul
+docker-compose.dev.yml      # démos run_demo_* conteneurisées
 docker-compose.test.yml     # parité CI conteneurisée
 ```

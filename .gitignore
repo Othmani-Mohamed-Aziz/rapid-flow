@@ -47,6 +47,7 @@ desktop.ini
 data/*
 !data/.gitkeep
 !data/README.md
+!data/study_schema_default.json
 
 # ── Sorties pipeline ─────────────────────────────────────────────────────
 outputs/

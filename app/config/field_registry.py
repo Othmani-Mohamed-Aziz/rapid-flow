@@ -5,6 +5,7 @@ from collections import defaultdict
 from app.config.ecrf_fields import EXAMPLE_ECRF_FIELDS
 from app.schemas.enums import DocumentType, ExtractionFamily, FieldFamily
 from app.schemas.models import FieldDefinition
+from app.schemas.study_schema import StudySchema
 
 
 class FieldRegistry:
@@ -12,13 +13,24 @@ class FieldRegistry:
 
     def __init__(self, fields: list[FieldDefinition]) -> None:
         self._by_name: dict[str, FieldDefinition] = {f.field_name: f for f in fields}
+        self._by_canonical: dict[str, list[FieldDefinition]] = {}
+        for f in fields:
+            if f.canonical_key:
+                self._by_canonical.setdefault(f.canonical_key, []).append(f)
 
     @classmethod
     def default(cls) -> FieldRegistry:
         return cls(list(EXAMPLE_ECRF_FIELDS))
 
+    @classmethod
+    def from_study_schema(cls, study_schema: StudySchema) -> FieldRegistry:
+        return cls(study_schema.to_field_definitions())
+
     def get(self, field_name: str) -> FieldDefinition | None:
         return self._by_name.get(field_name)
+
+    def by_canonical_key(self, canonical_key: str) -> list[FieldDefinition]:
+        return list(self._by_canonical.get(canonical_key, []))
 
     def all_fields(self) -> list[FieldDefinition]:
         return list(self._by_name.values())
@@ -41,4 +53,6 @@ class FieldRegistry:
 
 
 def get_default_registry() -> FieldRegistry:
-    return FieldRegistry.default()
+    from app.config.study_schema_provider import resolve_study_schema
+
+    return FieldRegistry.from_study_schema(resolve_study_schema())

@@ -1,6 +1,9 @@
 """
 Reranker CrossEncoder (BGE) appliqué sur les candidats Qdrant.
 
+Le second membre de chaque paire aligne l’upsert dense : `section_heading` + corps
+(`passage_for_embedding_and_rerank`), pas le seul `chunk.text`.
+
 Lazy import — `sentence-transformers` est dans l'extra `vector`.
 """
 
@@ -10,6 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Sequence
 
 from app.config.settings import Settings
+from app.indexing.retrieval_passage import passage_for_embedding_and_rerank
 from app.schemas.models import DocumentChunk
 
 
@@ -65,7 +69,7 @@ class BGECrossEncoderReranker(Reranker):
         if not candidates:
             return []
         model = self._ensure_model()
-        pairs = [(query, c.text or "") for c, _ in candidates]
+        pairs = [(query, passage_for_embedding_and_rerank(c)) for c, _ in candidates]
         scores = model.predict(pairs, show_progress_bar=False, convert_to_numpy=True)
         ranked = sorted(
             zip([c for c, _ in candidates], (float(s) for s in scores)),

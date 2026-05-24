@@ -1,7 +1,8 @@
 # `data/` — fichiers locaux uniquement
 
 **Ne jamais committer** de PDF, données patient, ou échantillons même synthétiques.
-Le contenu de ce dossier est gitignoré (cf. `.gitignore`) sauf `.gitkeep` et ce `README.md`.
+Le contenu de ce dossier est gitignoré (cf. `.gitignore`) sauf `.gitkeep`, ce `README.md`
+et `study_schema_default.json` (schéma d'exemple versionné, sans données patient).
 
 ## Comment utiliser ce dossier
 

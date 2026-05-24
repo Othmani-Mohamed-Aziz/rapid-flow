@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -14,6 +14,10 @@ from app.schemas.enums import (
 )
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class RawDocument(BaseModel):
     """Document brut après ingestion (bytes + métadonnées)."""
 
@@ -23,7 +27,7 @@ class RawDocument(BaseModel):
     source_path: str
     mime_type: str
     content_bytes: bytes
-    ingested_at: datetime = Field(default_factory=datetime.utcnow)
+    ingested_at: datetime = Field(default_factory=_utc_now)
 
 
 class DocumentSection(BaseModel):
@@ -140,7 +144,7 @@ class AuditRecord(BaseModel):
     """Trace d'audit pour une étape ou un lot d'extractions."""
 
     record_id: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utc_now)
     pipeline_version: str
     document_id: str
     patient_id: str
@@ -165,6 +169,10 @@ class FieldDefinition(BaseModel):
     normalization_rule: str | None = None
     target_column: str
     autofill_threshold: float = Field(ge=0.0, le=1.0, default=0.65)
+    canonical_key: str | None = None
+    extraction_strategy: str | None = None
+    langextract_class: str | None = None
+    retrieval_query: str | None = None
 
 
 class PipelineResult(BaseModel):

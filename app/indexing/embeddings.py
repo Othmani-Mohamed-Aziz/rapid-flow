@@ -10,9 +10,12 @@ Garanties :
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from app.config.settings import Settings
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 
 class EmbeddingService(ABC):
@@ -52,7 +55,7 @@ class HuggingFaceEmbeddingService(EmbeddingService):
 
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
-        self._model = None
+        self._model: SentenceTransformer | None = None
         self._passage_prefix = self.settings.embedding_passage_prefix
         self._query_prefix = self.settings.embedding_query_prefix
 

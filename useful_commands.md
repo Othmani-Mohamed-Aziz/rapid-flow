@@ -195,14 +195,55 @@ laisser `.env` en mode Qdrant pour le dev sans casser la CI.
 
 ## 5. Démos / Scripts utilitaires
 
-```powershell
-# Démo parsing seul (sans pipeline complet)
-python scripts\run_pdf_demo.py "c:\chemin\vers\rapport.pdf"
-python scripts\run_pdf_demo.py "c:\chemin\vers\rapport.pdf" --backend pypdf --json-out parsed.json
+Trois scripts, du plus restreint au plus complet — voir aussi [README § Scripts de démo](./README.md#scripts-de-démo-par-étape-pipeline).
 
-# Démo pipeline V1 (bilan sanguin mock)
-python scripts\run_local_demo.py
+```powershell
+# 1. Parsing + chunking seul (sans index / extraction)
+python scripts\run_demo_parsing.py "c:\chemin\vers\rapport.pdf"
+python scripts\run_demo_parsing.py "c:\chemin\vers\rapport.pdf" --backend pypdf --json-out parsed.json
+
+# 2. Index Qdrant hybride + retrieval + dumps JSON (sans extraction)
+# PDF par défaut data/ct_scan_report_liver.pdf ; ECRF_QDRANT_URL ex. http://localhost:6533
+python scripts\run_demo_retrieval.py --dump-dir outputs\demo_ct --dump-full-text
+
+# 3. Pipeline e2e (lab mock + CR imagerie ; Ollama requis pour la partie RECIST)
+python scripts\run_demo_e2e.py
+python scripts\run_demo_e2e.py --lab-only
 ```
+
+`run_demo_retrieval.py --dump-dir` écrit `01_ingestion.json` … `07_list_chunks.json` ; `--dump-full-text` évite la troncature de `full_text` dans `02_parsed.json`.
+
+### Via Docker (`docker-compose.dev.yml`)
+
+Chemin recommandé sur Windows pour retrieval / Qdrant (évite venv + deps `[vector]` manquantes). Voir [README § Via Docker](./README.md#via-docker-docker-composedevyml).
+
+```powershell
+# Build une fois (~5 Go)
+docker compose -f docker-compose.dev.yml build app
+
+docker compose -f docker-compose.dev.yml up -d qdrant
+
+# Parsing seul (sans Qdrant)
+docker compose -f docker-compose.dev.yml run --rm --no-deps app `
+  python scripts/run_demo_parsing.py data/ct_scan_report_liver.pdf
+
+# Retrieval hybride
+docker compose -f docker-compose.dev.yml run --rm app `
+  python scripts/run_demo_retrieval.py --dump-dir outputs/demo_ct --dump-full-text
+
+# Pipeline e2e (memory)
+docker compose -f docker-compose.dev.yml run --rm --no-deps app `
+  python scripts/run_demo_e2e.py
+
+# Labo seul (sans Ollama / sans PDF imagerie)
+docker compose -f docker-compose.dev.yml run --rm --no-deps app `
+  python scripts/run_demo_e2e.py --lab-only
+
+# Shell dans le conteneur
+docker compose -f docker-compose.dev.yml run --rm app bash
+```
+
+Ollama conteneurisé (profile `imaging`) : `docker compose -f docker-compose.dev.yml --profile imaging up -d ollama` puis `-e ECRF_OLLAMA_URL=http://ollama:11434` sur les commandes `run`.
 
 ---
 
@@ -348,8 +389,10 @@ docker compose -f docker-compose.test.yml --profile integration down -v
 
 | Volume | Usage |
 |---|---|
-| `rapid_flow_hf_cache` | cache modèles HF (e5, bge-reranker, bm25) — partagé entre runs |
-| `qdrant_storage` | données Qdrant (compose `docker-compose.qdrant.yml`) |
+| `rapid_flow_hf_cache` | cache modèles HF (e5, bge-reranker, bm25) — partagé `dev.yml` / `test.yml` |
+| `qdrant_storage` | données Qdrant (`docker-compose.qdrant.yml`) |
+| `rapid_flow_qdrant_dev_storage` | données Qdrant (`docker-compose.dev.yml`) |
+| `rapid_flow_ollama_dev_models` | modèles Ollama (profile `imaging` dans `dev.yml`) |
 
 ```powershell
 docker volume ls --filter "name=rapid_flow"

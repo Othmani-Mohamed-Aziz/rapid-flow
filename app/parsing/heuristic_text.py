@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.parsing.base import ParsingService
-from app.parsing.text_enrichment import extract_document_date, guess_document_type
+from app.parsing.document_type_scoring import classify_document_type
+from app.parsing.text_enrichment import extract_document_date
 from app.schemas.models import ParsedDocument, RawDocument
 
 
@@ -18,12 +19,14 @@ class HeuristicTextParser(ParsingService):
     def parse(self, raw: RawDocument) -> ParsedDocument:
         text, meta = self._decode_text(raw)
         doc_date = extract_document_date(text)
+        cls = classify_document_type(text, [], meta)
+        meta = {**meta, **cls.as_metadata()}
         return ParsedDocument(
             document_id=raw.document_id,
             patient_id=raw.patient_id,
             study_id=raw.study_id,
             full_text=text,
-            document_type_hint=guess_document_type(text, raw.mime_type),
+            document_type_hint=cls.document_type,
             language=meta.get("language"),
             document_date=doc_date,
             metadata=meta,

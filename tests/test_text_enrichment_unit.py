@@ -29,3 +29,18 @@ def test_guess_document_type_imaging() -> None:
 def test_guess_document_type_unknown() -> None:
     text = "Courrier administratif sans terme clinique spécifique."
     assert guess_document_type(text, "application/pdf") == DocumentType.UNKNOWN
+
+
+def test_guess_document_type_imaging_wins_over_ast_in_contraste() -> None:
+    """« ast » ne doit pas matcher dans « contraste » (produit de contraste)."""
+    text = (
+        "COMPTE RENDU DE SCANNER ABDOMINO-PELVIEN\n"
+        "Injection de produit de contraste iodé.\n"
+        "Critères RECIST.\n"
+    )
+    assert guess_document_type(text, "application/pdf") == DocumentType.IMAGING_REPORT
+
+
+def test_guess_document_type_short_lab_tokens_need_word_boundaries() -> None:
+    text = "Lettre de suivi : injection de contraste iodé, patient stable."
+    assert guess_document_type(text, "application/pdf") == DocumentType.UNKNOWN

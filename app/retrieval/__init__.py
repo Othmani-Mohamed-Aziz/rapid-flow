@@ -3,12 +3,14 @@ from app.retrieval.workflow_orchestrator import (
     BaseWorkflowOrchestrator,
     LocalWorkflowOrchestrator,
     RagflowWorkflowOrchestrator,
+    VectorStoreWorkflowOrchestrator,
 )
 
 __all__ = [
     "BaseWorkflowOrchestrator",
     "LocalWorkflowOrchestrator",
     "RagflowWorkflowOrchestrator",
+    "VectorStoreWorkflowOrchestrator",
     "RetrievalService",
     "VectorBackedRetrievalService",
 ]

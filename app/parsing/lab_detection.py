@@ -85,6 +85,15 @@ _VALUE_UNIT_HINT = re.compile(
     re.I,
 )
 
+# Marqueurs courts : sous-chaîne seule → faux positifs (ex. « ast » dans « contraste »).
+_WEAK_LAB_BOUNDARY = frozenset({"ast", "alt", "tp", "crp", "hb", "plt"})
+
+
+def _weak_lab_keyword_present(keyword: str, s: str) -> bool:
+    if keyword in _WEAK_LAB_BOUNDARY:
+        return bool(re.search(rf"\b{re.escape(keyword)}\b", s))
+    return keyword in s
+
 
 def lab_document_score(sample: str) -> int:
     """Score entier ≥ 0 ; interprétation via seuils selon contexte."""
@@ -98,13 +107,13 @@ def lab_document_score(sample: str) -> int:
             score += 2
     if re.search(r"\bbiologie\b", s):
         score += 2
-    weak_hits = sum(1 for k in _WEAK_LAB if k in s)
+    weak_hits = sum(1 for k in _WEAK_LAB if _weak_lab_keyword_present(k, s))
     score += min(weak_hits, 3)
     if _VALUE_UNIT_HINT.search(s):
         score += 2
     # Ligne résultat typique (analyte + valeur + unité) sans tout le contexte « laboratoire »
     if _VALUE_UNIT_HINT.search(s) and any(
-        k in s
+        _weak_lab_keyword_present(k, s) if k in _WEAK_LAB_BOUNDARY else k in s
         for k in (
             "ast",
             "alt",

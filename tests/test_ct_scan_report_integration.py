@@ -15,6 +15,7 @@ from app.config.settings import Settings
 from app.parsing.chunking import DefaultChunkingService, SectionBasedChunkingService
 from app.parsing.lab_detection import is_probable_lab_document, lab_document_score
 from app.parsing.smart_service import SmartParsingService
+from app.schemas.enums import DocumentType
 from tests.data_paths import CT_SCAN_REPORT_LIVER_PDF
 
 pytestmark = pytest.mark.ct_integration_pdf
@@ -55,6 +56,18 @@ def test_docling_parses_ct_scan_metadata(ct_scan_parsed_docling) -> None:
     assert parsed.metadata.get("chunking_strategy") == "sections"
     assert parsed.metadata.get("full_text_source") == "assembled_structured_sections"
     assert "lab_document_score" in parsed.metadata
+
+
+def test_docling_ct_scan_document_type_hint_is_imaging(ct_scan_parsed_docling) -> None:
+    parsed = ct_scan_parsed_docling
+    assert parsed.document_type_hint == DocumentType.IMAGING_REPORT
+
+
+def test_docling_ct_scan_first_section_marked_admin(ct_scan_parsed_docling) -> None:
+    parsed = ct_scan_parsed_docling
+    assert parsed.structured_sections[0].metadata.get("content_kind") == "admin_section"
+    chunks = SectionBasedChunkingService().chunk(parsed)
+    assert chunks[0].metadata.get("content_kind") == "admin_section"
 
 
 def test_docling_ct_scan_not_classified_as_lab(ct_scan_parsed_docling) -> None:

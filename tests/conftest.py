@@ -70,3 +70,17 @@ def ct_scan_raw_document():
         patient_id="test-ct-patient",
         study_id="test-ct-study",
     )
+
+
+@pytest.fixture(scope="module")
+def default_study_schema():
+    from tests.extraction_fixtures import resolve_study_schema
+
+    return resolve_study_schema()
+
+
+@pytest.fixture
+def default_extraction_service(default_study_schema):
+    from tests.extraction_fixtures import build_extraction_service
+
+    return build_extraction_service(default_study_schema, langextract_enabled=False)

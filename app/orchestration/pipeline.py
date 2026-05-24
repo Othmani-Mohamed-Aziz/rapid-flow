@@ -1,18 +1,26 @@
 from __future__ import annotations
 
-from collections import defaultdict
+import logging
 from pathlib import Path
 
 from app.business_rules.confidence import ConfidenceScoringService
 from app.business_rules.mapping import FieldMappingService
+from app.business_rules.normalization import NormalizationService
 from app.business_rules.temporal import TemporalMappingService
 from app.business_rules.validation import ValidationService
-from app.config.field_registry import FieldRegistry, get_default_registry
+from app.config.field_registry import FieldRegistry
 from app.config.settings import Settings
+from app.config.study_schema_provider import resolve_study_schema
 from app.etl.export import EcrfExportService
-from app.extraction.langextract_extractor import LangExtractExtractor
 from app.extraction.llama_extractor import LlamaExtractor
+from app.extraction.planner import field_families_from_jobs, plan_extraction_jobs
 from app.extraction.service import ExtractionService
+from app.extraction.strategy_extractors import (
+    ExtractorRegistry,
+    ImagingLangextractStrategy,
+    LabDeterministicStrategy,
+    NarrativeKeywordsStrategy,
+)
 from app.indexing import build_default_vector_service
 from app.indexing.vector_service import VectorIndexService
 from app.ingestion.service import DocumentIngestionService, LocalFileIngestionService
@@ -27,7 +35,10 @@ from app.retrieval.workflow_orchestrator import (
 from app.routing.router import DocumentRouter, KeywordHeuristicDocumentRouter
 from app.schemas.enums import FieldFamily
 from app.schemas.models import AuditRecord, EcrfCellUpdate, PipelineResult
+from app.schemas.study_schema import StudySchema
 from app.utils.audit import AuditTrailService
+
+_LOG = logging.getLogger(__name__)
 
 
 class PipelineOrchestrator:
@@ -38,6 +49,7 @@ class PipelineOrchestrator:
         *,
         settings: Settings | None = None,
         registry: FieldRegistry | None = None,
+        study_schema: StudySchema | None = None,
         ingestion: DocumentIngestionService | None = None,
         parsing: ParsingService | None = None,
         chunking: ChunkingService | None = None,
@@ -46,7 +58,9 @@ class PipelineOrchestrator:
         vector_index: VectorIndexService | None = None,
     ) -> None:
         self.settings = settings or Settings()
-        self.registry = registry or get_default_registry()
+        schema_path = self.settings.study_schema_path
+        self.study_schema = study_schema or resolve_study_schema(schema_path)
+        self.registry = registry or FieldRegistry.from_study_schema(self.study_schema)
         self.ingestion = ingestion or LocalFileIngestionService()
         self.parsing = parsing or SmartParsingService(self.settings)
         self.chunking = chunking or DefaultChunkingService(self.settings)
@@ -58,17 +72,36 @@ class PipelineOrchestrator:
             self.workflow = VectorStoreWorkflowOrchestrator(self.vector_index)
         else:
             self.workflow = LocalWorkflowOrchestrator()
+        llama = LlamaExtractor(
+            model_name=self.settings.mock_llama_model_name,
+            schema_version=self.study_schema.schema_version,
+        )
+        extractor_registry = ExtractorRegistry(
+            imaging=ImagingLangextractStrategy(
+                study_schema=self.study_schema,
+                model_id=self.settings.ollama_model_id,
+                model_url=self.settings.ollama_url,
+                timeout=self.settings.ollama_timeout_s,
+                schema_version=self.settings.langextract_schema_version,
+                langextract_enabled=self.settings.langextract_enabled,
+            ),
+            lab=LabDeterministicStrategy(
+                study_schema=self.study_schema,
+                schema_version=self.study_schema.schema_version,
+            ),
+            narrative=NarrativeKeywordsStrategy(
+                study_schema=self.study_schema,
+                schema_version=self.study_schema.schema_version,
+            ),
+            llama=llama,
+        )
         self.extraction = ExtractionService(
-            langextract=LangExtractExtractor(
-                model_name=self.settings.mock_langextract_version,
-                schema_version=self.settings.mock_langextract_version,
-            ),
-            llama=LlamaExtractor(
-                model_name=self.settings.mock_llama_model_name,
-                schema_version="lab-ft-mock",
-            ),
+            extractor_registry=extractor_registry,
+            study_schema=self.study_schema,
+            imaging_extraction_max_workers=self.settings.imaging_extraction_max_workers,
         )
         self.temporal = TemporalMappingService()
+        self.normalization = NormalizationService()
         self.mapping = FieldMappingService(self.registry)
         self.validation = ValidationService(self.registry)
         self.confidence = ConfidenceScoringService()
@@ -77,6 +110,12 @@ class PipelineOrchestrator:
 
     def run(self, document_path: str, patient_id: str, study_id: str) -> PipelineResult:
         audit: list[AuditRecord] = []
+        if self.study_schema.study_id != study_id:
+            _LOG.warning(
+                "study_id argument %r ≠ study_schema.study_id %r — tenant/index utilisent l'argument.",
+                study_id,
+                self.study_schema.study_id,
+            )
 
         raw = self.ingestion.ingest(document_path, patient_id, study_id)
         audit.append(
@@ -116,15 +155,24 @@ class PipelineOrchestrator:
             )
         )
 
+        doc_type = self.router.route(parsed)
+        audit.append(
+            self.audit.record_step(
+                document_id=raw.document_id,
+                patient_id=patient_id,
+                study_id=study_id,
+                step="routing",
+                details={"document_type": doc_type.value},
+            )
+        )
+
         tenant_id = study_id  # Option C : tenant par défaut = study_id
-        if isinstance(self.workflow, VectorStoreWorkflowOrchestrator):
-            self.workflow._tenant_id = tenant_id  # noqa: SLF001 — paramétrage runtime
         self.vector_index.upsert_chunks(
             chunks,
             tenant_id=tenant_id,
             patient_id=patient_id,
             study_id=study_id,
-            document_type=parsed.document_type_hint.value,
+            document_type=doc_type.value,
         )
         audit.append(
             self.audit.record_step(
@@ -140,24 +188,20 @@ class PipelineOrchestrator:
             )
         )
 
-        doc_type = self.router.route(parsed)
-        audit.append(
-            self.audit.record_step(
-                document_id=raw.document_id,
-                patient_id=patient_id,
-                study_id=study_id,
-                step="routing",
-                details={"document_type": doc_type.value},
-            )
-        )
-
-        field_defs = self.registry.for_document_type(doc_type)
-        families = sorted({fd.field_family for fd in field_defs}, key=lambda f: f.value)
+        extraction_jobs = plan_extraction_jobs(self.study_schema, doc_type)
+        families = field_families_from_jobs(extraction_jobs)
+        family_queries: dict = {}
+        for fam in families:
+            q = self.study_schema.retrieval_query_for_family(fam)
+            if q:
+                family_queries[fam] = q
         family_hits = self.workflow.retrieve_for_families(
             document_id=raw.document_id,
             chunks=chunks,
             families=families,
             top_k_per_family=5,
+            tenant_id=tenant_id,
+            family_queries=family_queries or None,
         )
         best_retrieval: dict[FieldFamily, float | None] = {
             fam: max((h.score for h in hits), default=None) for fam, hits in family_hits.items()
@@ -175,37 +219,27 @@ class PipelineOrchestrator:
             )
         )
 
-        observations_by_family: dict[FieldFamily, list] = defaultdict(list)
-        for fam in families:
-            hits = family_hits.get(fam, [])
-            obs = self.extraction.extract_for_family(
-                doc_type=doc_type,
-                field_family=fam,
-                hits=hits,
-                field_defs=field_defs,
-            )
-            observations_by_family[fam].extend(obs)
-            for ob in obs:
-                audit.append(
-                    self.audit.from_observation(
-                        document_id=raw.document_id,
-                        patient_id=patient_id,
-                        study_id=study_id,
-                        step="extraction",
-                        observation=ob,
-                    )
+        observations = self.extraction.extract_all_for_document(
+            doc_type=doc_type,
+            family_hits=family_hits,
+        )
+        for ob in observations:
+            audit.append(
+                self.audit.from_observation(
+                    document_id=raw.document_id,
+                    patient_id=patient_id,
+                    study_id=study_id,
+                    step="extraction",
+                    observation=ob,
                 )
+            )
 
-        observations: list = []
-        seen_obs: set[str] = set()
-        for fam in families:
-            for o in observations_by_family[fam]:
-                if o.observation_id in seen_obs:
-                    continue
-                seen_obs.add(o.observation_id)
-                observations.append(o)
-
-        candidates = self.mapping.build_candidates(doc_type=doc_type, observations=observations)
+        candidates = self.mapping.build_candidates(
+            doc_type=doc_type,
+            observations=observations,
+            parsed=parsed,
+            normalize_fn=self.normalization.apply,
+        )
         enriched_candidates = []
         for cand in candidates:
             fd = self.registry.get(cand.field_name)
@@ -236,6 +270,7 @@ class PipelineOrchestrator:
         observations = [temporal_by_id.get(o.observation_id, o) for o in observations]
 
         cell_updates: list[EcrfCellUpdate] = []
+        best_by_column: dict[str, tuple[float, EcrfCellUpdate]] = {}
         for cand in enriched_candidates:
             fd = self.registry.get(cand.field_name)
             if fd is None:
@@ -257,7 +292,10 @@ class PipelineOrchestrator:
                 provenance=cand,
                 validated=False,
             )
-            cell_updates.append(update)
+            prev = best_by_column.get(update.column_key)
+            if prev is None or blended > prev[0]:
+                best_by_column[update.column_key] = (blended, update)
+        cell_updates = [pair[1] for pair in best_by_column.values()]
 
         audit.append(
             self.audit.record_step(
@@ -292,7 +330,11 @@ class PipelineOrchestrator:
             observations=observations,
             cell_updates=validated_updates,
             audit_trail=audit,
-            metadata={"document_path": str(Path(document_path).resolve())},
+            metadata={
+                "document_path": str(Path(document_path).resolve()),
+                "study_schema_version": self.study_schema.schema_version,
+                "study_id_config": self.study_schema.study_id,
+            },
         )
         paths = self.export_service.export(result, output_dir)
         audit.append(

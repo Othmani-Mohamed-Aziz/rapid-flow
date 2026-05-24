@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+from app.parsing.document_type_scoring import classify_document_type
 from app.schemas.enums import DocumentType
 from app.schemas.models import ParsedDocument
 
@@ -15,31 +16,14 @@ class DocumentRouter(ABC):
 
 
 class KeywordHeuristicDocumentRouter(DocumentRouter):
-    """Routage V1 par mots-clés (bilan sanguin prioritaire)."""
-
-    _LAB = (
-        "nfs",
-        "hémogramme",
-        "hemogramme",
-        "plaquette",
-        "leucocyte",
-        "crp",
-        "bilirubin",
-        "bilirubine",
-        "ast",
-        "alt",
-        "tp",
-        "inr",
-    )
-
-    _IMG = ("recist", "tdm", "scanner", "irm", "imagerie", "lésion", "lesion")
+    """Routage V1 : hint parseur si connu, sinon même classifieur que le scoring documentaire."""
 
     def route(self, parsed: ParsedDocument) -> DocumentType:
         if parsed.document_type_hint != DocumentType.UNKNOWN:
             return parsed.document_type_hint
-        lower = parsed.full_text.lower()
-        if any(k in lower for k in self._LAB):
-            return DocumentType.LAB_BLOOD_PANEL
-        if any(k in lower for k in self._IMG):
-            return DocumentType.IMAGING_REPORT
-        return DocumentType.UNKNOWN
+        cls = classify_document_type(
+            parsed.full_text,
+            parsed.structured_sections,
+            parsed.metadata,
+        )
+        return cls.document_type

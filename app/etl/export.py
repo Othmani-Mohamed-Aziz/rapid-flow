@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from app.schemas.models import PipelineResult
+from app.utils.safe_paths import redact_file_paths_in_jsonable
 
 
 class EcrfExportService:
@@ -27,7 +28,7 @@ class EcrfExportService:
         json_path = out / f"{basename}.json"
         csv_path = out / f"{basename}_ecrf_mock.csv"
 
-        payload = result.model_dump(mode="json")
+        payload = redact_file_paths_in_jsonable(result.model_dump(mode="json"))
         json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
         self._write_csv_mock(csv_path, result)

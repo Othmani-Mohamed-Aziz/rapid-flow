@@ -50,6 +50,33 @@ def test_default_chunking_routes_sections_when_requested() -> None:
     assert out[0].metadata.get("chunker") == "SectionBasedChunkingService"
 
 
+def test_section_based_chunking_propagates_admin_content_kind() -> None:
+    parsed = ParsedDocument(
+        document_id="d1",
+        patient_id="p1",
+        study_id="s1",
+        full_text="Admin\n\nClinique",
+        document_type_hint=DocumentType.IMAGING_REPORT,
+        document_date=None,
+        metadata={"chunking_strategy": "sections"},
+        structured_sections=[
+            DocumentSection(
+                heading="CENTRE D'IMAGERIE MÉDICALE PARIS",
+                body="Service de Radiologie",
+                metadata={"source": "docling_graph", "content_kind": "admin_section"},
+            ),
+            DocumentSection(
+                heading="CONCLUSION",
+                body="Stabilité.",
+                metadata={"source": "docling_graph", "content_kind": "clinical_section"},
+            ),
+        ],
+    )
+    chunks = SectionBasedChunkingService().chunk(parsed)
+    assert chunks[0].metadata.get("content_kind") == "admin_section"
+    assert chunks[1].metadata.get("content_kind") == "clinical_section"
+
+
 def test_default_chunking_lab_heuristic_when_no_strategy() -> None:
     parsed = _parsed_narrative(strategy=None)
     parsed = parsed.model_copy(

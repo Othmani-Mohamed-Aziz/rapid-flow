@@ -34,7 +34,9 @@ api = [
 ]
 vector = [
   "qdrant-client>=1.10",
-  "sentence-transformers>=3.0",
+  # ST 5.x + transformers 5.x : chargement HF texte-only peut échouer (processor/tokenizer).
+  "sentence-transformers>=3.0,<5",
+  "transformers>=4.40,<5",
   "fastembed>=0.3",
   "tenacity>=8.0",
 ]
@@ -44,6 +46,10 @@ llamaindex = [
   "llama-index-core>=0.11",
   "llama-index-vector-stores-qdrant>=0.3",
   "llama-index-embeddings-huggingface>=0.3",
+]
+# LangExtract + Ollama pour extraction structurée imagerie (chunks RAG).
+extraction = [
+  "langextract>=1.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -59,6 +65,7 @@ pythonpath = ["."]
 markers = [
   "optional_user_pdf: parse un PDF fourni via ECRF_TEST_PDF_PATH ou tests/fixtures/local_lab.pdf",
   "ct_integration_pdf: intégration sur data/ct_scan_report_liver.pdf (ou ECRF_CT_TEST_PDF_PATH)",
+  "extraction_integration: intégration phase extraction (pipeline + schéma, LangExtract mocké)",
   "real_vector_backend: test opt-in qui utilise un vrai backend vector store (Qdrant + fastembed/torch) ; sinon les tests sont forcés en mode `memory` pour isolation",
 ]
 

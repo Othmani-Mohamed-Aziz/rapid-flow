@@ -1,0 +1,130 @@
+# ============================================================================
+# rapid-flow — Stack de développement / démos conteneurisées
+# ============================================================================
+#
+# Objectif : exécuter run_demo_parsing | run_demo_retrieval | run_demo_e2e
+# dans l'image `rapid-flow:test` (Python 3.13 Linux, extras vector + docling),
+# sans dépendre du venv hôte (notamment Windows + Py 3.14 + fastembed).
+#
+# Prérequis : Docker Desktop, BuildKit activé.
+#
+# Build (une fois, ~5 Go) :
+#   docker compose -f docker-compose.dev.yml build app
+#
+# Démarrer Qdrant :
+#   docker compose -f docker-compose.dev.yml up -d qdrant
+#
+# Exemples :
+#   # Parsing seul (sans Qdrant)
+#   docker compose -f docker-compose.dev.yml run --rm --no-deps app \
+#     python scripts/run_demo_parsing.py data/ct_scan_report_liver.pdf
+#
+#   # Retrieval hybride
+#   docker compose -f docker-compose.dev.yml run --rm app \
+#     python scripts/run_demo_retrieval.py --dump-dir outputs/demo_ct
+#
+#   # Pipeline e2e (memory)
+#   docker compose -f docker-compose.dev.yml run --rm --no-deps app \
+#     python scripts/run_demo_e2e.py
+#
+#   # Pipeline e2e + Qdrant (ECRF_VECTOR_BACKEND=qdrant par défaut dans ce compose)
+#   docker compose -f docker-compose.dev.yml run --rm app \
+#     python scripts/run_demo_e2e.py
+#
+#   # Shell interactif
+#   docker compose -f docker-compose.dev.yml run --rm app bash
+#
+# Ollama (extraction imagerie) :
+#   - Par défaut : Ollama sur l'hôte → ECRF_OLLAMA_URL=http://host.docker.internal:11434
+#   - Conteneurisé : docker compose -f docker-compose.dev.yml --profile imaging up -d ollama
+#     puis -e ECRF_OLLAMA_URL=http://ollama:11434 sur les commandes run
+#
+# Diffère de docker-compose.test.yml (CI pytest) et docker-compose.qdrant.yml (Qdrant seul).
+# ============================================================================
+
+services:
+
+  qdrant:
+    image: qdrant/qdrant:v1.18.0
+    container_name: rapid_flow_qdrant_dev
+    restart: unless-stopped
+    ports:
+      - "6533:6333"
+      - "6534:6334"
+    environment:
+      QDRANT__LOG_LEVEL: INFO
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/127.0.0.1/6333 && echo -e 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -n 1 <&3 | grep -q 200",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - rapidflow-dev
+
+  app:
+    build:
+      context: .
+      target: test
+      args:
+        PYTHON_VERSION: "3.13"
+    image: rapid-flow:dev
+    container_name: rapid_flow_dev_app
+    depends_on:
+      qdrant:
+        condition: service_healthy
+        required: false
+    extra_hosts:
+      # Ollama sur l'hôte (Windows / Mac Docker Desktop ; Linux avec host-gateway).
+      - "host.docker.internal:host-gateway"
+    environment:
+      HF_HOME: /opt/hf-cache
+      ECRF_VECTOR_BACKEND: qdrant
+      ECRF_QDRANT_URL: http://qdrant:6333
+      ECRF_QDRANT_COLLECTION_PREFIX: ecrf_chunks_dev
+      ECRF_ENABLE_SPARSE_BM25: "true"
+      ECRF_ENABLE_RERANKER: "true"
+      ECRF_PDF_PARSER_BACKEND: auto
+      ECRF_LANGEXTRACT_ENABLED: "true"
+      ECRF_OLLAMA_URL: ${ECRF_OLLAMA_URL:-http://host.docker.internal:11434}
+      ECRF_OLLAMA_MODEL_ID: ${ECRF_OLLAMA_MODEL_ID:-gemma2:2b}
+      ECRF_OLLAMA_TIMEOUT_S: "120"
+    volumes:
+      - .:/app
+      - hf_cache:/opt/hf-cache
+      - ./outputs:/app/outputs
+      - ./data:/app/data
+    working_dir: /app
+    stdin_open: true
+    tty: true
+    networks:
+      - rapidflow-dev
+
+  ollama:
+    profiles: ["imaging"]
+    image: ollama/ollama:latest
+    container_name: rapid_flow_ollama_dev
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - rapidflow-dev
+
+volumes:
+  hf_cache:
+    name: rapid_flow_hf_cache
+  qdrant_storage:
+    name: rapid_flow_qdrant_dev_storage
+  ollama_models:
+    name: rapid_flow_ollama_dev_models
+
+networks:
+  rapidflow-dev:
+    name: rapid_flow_dev_net

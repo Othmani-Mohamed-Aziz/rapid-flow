@@ -1,0 +1,58 @@
+{
+  "study_id": "MINIMAL_TEST",
+  "schema_version": "minimal-v1",
+  "family_retrieval_queries": {
+    "hepatic_biochemistry": "bilan hépatique AST ALT",
+    "imaging_recist": "RECIST scanner lésion mm"
+  },
+  "extraction_catalog": {
+    "langextract_class_map": {
+      "custom_size": "Size_major_nodule_mm"
+    },
+    "langextract_class_descriptions": {
+      "custom_size": "taille personnalisée en mm"
+    },
+    "lab_analytes": [
+      {
+        "canonical_key": "GGT",
+        "pattern": "\\bGGT\\b\\s*[:=]?\\s*([0-9]+(?:[.,][0-9]+)?)",
+        "unit": "U/L",
+        "field_family": "hepatic_biochemistry"
+      }
+    ],
+    "narrative_keywords": [
+      {
+        "canonical_key": "Cirrhosis",
+        "keywords": ["cirrhose", "cirrhosis"]
+      }
+    ]
+  },
+  "fields": [
+    {
+      "field_name": "GGT_level",
+      "field_type": "numeric",
+      "document_types_allowed": ["lab_blood_panel"],
+      "extraction_family": "lab_values",
+      "field_family": "hepatic_biochemistry",
+      "temporal_scope": "baseline",
+      "target_column": "GGT_level",
+      "autofill_threshold": 0.6,
+      "canonical_key": "GGT",
+      "extraction_strategy": "lab_deterministic"
+    },
+    {
+      "field_name": "Size_major_nodule_mm_start_AtezoBev_D0",
+      "field_type": "numeric",
+      "document_types_allowed": ["imaging_report"],
+      "extraction_family": "imaging_recist",
+      "field_family": "imaging_recist",
+      "temporal_scope": "baseline",
+      "normalization_rule": "numeric_mm",
+      "target_column": "Size_major_nodule_mm_start_AtezoBev_D0",
+      "autofill_threshold": 0.7,
+      "canonical_key": "Size_major_nodule_mm",
+      "extraction_strategy": "imaging_langextract",
+      "langextract_class": "lesion_size_mm"
+    }
+  ]
+}

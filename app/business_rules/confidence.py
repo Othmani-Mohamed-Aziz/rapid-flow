@@ -12,9 +12,18 @@ class ConfidenceScoringService:
         retrieval_score: float | None,
     ) -> float:
         base = observation.confidence
-        if retrieval_score is None:
+        rs_from_obs: float | None = None
+        if observation.extra:
+            raw_rs = observation.extra.get("retrieval_score")
+            if raw_rs is not None:
+                try:
+                    rs_from_obs = float(raw_rs)
+                except (TypeError, ValueError):
+                    rs_from_obs = None
+        final_rs = rs_from_obs if rs_from_obs is not None else retrieval_score
+        if final_rs is None:
             return base
-        return max(0.0, min(1.0, 0.5 * base + 0.5 * retrieval_score))
+        return max(0.0, min(1.0, 0.5 * base + 0.5 * final_rs))
 
     def score_candidate(
         self,

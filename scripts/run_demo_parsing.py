@@ -1,10 +1,16 @@
 """
-Démo parsing PDF (et post-traitement labo) sans exécuter tout le pipeline.
+Démo **parsing + chunking** — sans indexation, retrieval ni extraction.
+
+Étape pipeline couverte : ingestion → parsing → chunking (aperçu console).
+
+Scripts complémentaires :
+  - index Qdrant + retrieval (sans extraction) : ``run_demo_retrieval.py``
+  - pipeline produit complète (extraction + export eCRF) : ``run_demo_e2e.py``
 
 Usage :
-    python scripts/run_pdf_demo.py chemin/vers/fichier.pdf
-    python scripts/run_pdf_demo.py chemin/vers/fichier.pdf --backend pypdf
-    python scripts/run_pdf_demo.py chemin/vers/fichier.pdf --json-out sortie.json
+    python scripts/run_demo_parsing.py chemin/vers/fichier.pdf
+    python scripts/run_demo_parsing.py chemin/vers/fichier.pdf --backend pypdf
+    python scripts/run_demo_parsing.py chemin/vers/fichier.pdf --json-out sortie.json
 """
 
 from __future__ import annotations
@@ -90,6 +96,11 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n--- Résumé ---")
     print("pdf_parser:", parsed.metadata.get("pdf_parser"))
+    print("document_type_hint:", parsed.document_type_hint.value)
+    scores = parsed.metadata.get("document_type_scores")
+    if isinstance(scores, dict):
+        top = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:3]
+        print("document_type_scores (top 3):", top)
     print("chunking_strategy:", parsed.metadata.get("chunking_strategy"))
     print("sections:", len(parsed.structured_sections))
     print("lab_lines:", len(parsed.structured_lab_lines))

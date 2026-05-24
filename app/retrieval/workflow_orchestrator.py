@@ -22,8 +22,15 @@ class BaseWorkflowOrchestrator(ABC):
         chunks: list[DocumentChunk],
         families: list[FieldFamily],
         top_k_per_family: int = 3,
+        tenant_id: str | None = None,
+        family_queries: dict[FieldFamily, str] | None = None,
     ) -> dict[FieldFamily, list[RetrievalHit]]:
-        """Retourne des hits par famille de champs."""
+        """Retourne des hits par famille de champs.
+
+        Args:
+            tenant_id: obligatoire pour les orchestrateurs branchés sur un vector store
+                partitionné par tenant (ex. Qdrant) ; ignoré en mode purement local.
+        """
 
 
 class LocalWorkflowOrchestrator(BaseWorkflowOrchestrator):
@@ -36,7 +43,10 @@ class LocalWorkflowOrchestrator(BaseWorkflowOrchestrator):
         chunks: list[DocumentChunk],
         families: list[FieldFamily],
         top_k_per_family: int = 3,
+        tenant_id: str | None = None,  # noqa: ARG002 — non utilisé en mémoire locale
+        family_queries: dict[FieldFamily, str] | None = None,
     ) -> dict[FieldFamily, list[RetrievalHit]]:
+        _ = tenant_id, family_queries
         out: dict[FieldFamily, list[RetrievalHit]] = {}
         doc_chunks = [c for c in chunks if c.document_id == document_id]
         for fam in families:
@@ -66,8 +76,8 @@ class VectorStoreWorkflowOrchestrator(BaseWorkflowOrchestrator):
     """
     Orchestrateur qui interroge un `VectorIndexService` (Qdrant ou mémoire).
 
-    Le `tenant_id` est requis ; on utilise une **requête générique par famille** comme
-    base (mot-clé canonique de la famille) puis le reranker du vector store affine.
+    Le `tenant_id` doit être fourni à chaque appel (`retrieve_for_families`) ou
+    une seule fois via le constructeur (rétrocompat tests / scripts courts).
     """
 
     _FAMILY_QUERY: dict[FieldFamily, str] = {
@@ -76,6 +86,14 @@ class VectorStoreWorkflowOrchestrator(BaseWorkflowOrchestrator):
         FieldFamily.HEPATIC_BIOCHEMISTRY: "bilan hépatique AST ALT GGT bilirubine",
         FieldFamily.INFLAMMATION_BIOMARKERS: "inflammation CRP biomarqueurs",
         FieldFamily.COMORBIDITIES: "antécédents comorbidités traitements",
+        FieldFamily.IMAGING_RECIST: (
+            "RECIST réponse tumorielle cible non cible progression stabilité "
+            "scanner TDM IRM mesure lésion millimètres mm"
+        ),
+        FieldFamily.TREATMENT_LINES: (
+            "ligne de traitement chimiothérapie immunothérapie protocole cycle "
+            "dose arrêt efficacité toxicité seconde ligne troisième ligne"
+        ),
     }
 
     def __init__(self, vector_index, *, tenant_id: str | None = None) -> None:
@@ -86,20 +104,37 @@ class VectorStoreWorkflowOrchestrator(BaseWorkflowOrchestrator):
         self,
         *,
         document_id: str,
-        chunks: list[DocumentChunk],  # noqa: ARG002 — non utilisé (la source de vérité = le store)
+        chunks: list[DocumentChunk],
         families: list[FieldFamily],
         top_k_per_family: int = 3,
+        tenant_id: str | None = None,
+        family_queries: dict[FieldFamily, str] | None = None,
     ) -> dict[FieldFamily, list[RetrievalHit]]:
+        effective_tenant = (tenant_id or self._tenant_id or "").strip()
+        if not effective_tenant:
+            raise ValueError(
+                "tenant_id obligatoire pour VectorStoreWorkflowOrchestrator "
+                "(passer tenant_id=... à retrieve_for_families ou au constructeur)."
+            )
+        for c in chunks:
+            if c.document_id != document_id:
+                raise ValueError(
+                    "retrieve_for_families: incohérence document_id — "
+                    f"chunk {c.chunk_id!r} a document_id={c.document_id!r}, "
+                    f"attendu {document_id!r}."
+                )
         out: dict[FieldFamily, list[RetrievalHit]] = {}
         for fam in families:
-            query = self._FAMILY_QUERY.get(fam, fam.value.replace("_", " "))
+            query = (family_queries or {}).get(fam) or self._FAMILY_QUERY.get(
+                fam, fam.value.replace("_", " ")
+            )
             try:
                 results = self._index.search(
                     document_id=document_id,
                     query_text=query,
                     field_family=fam,
                     top_k=top_k_per_family,
-                    tenant_id=self._tenant_id,
+                    tenant_id=effective_tenant,
                 )
             except TypeError:
                 results = self._index.search(
@@ -120,8 +155,7 @@ class RagflowWorkflowOrchestrator(BaseWorkflowOrchestrator):
     """
     Point d'accroche RAGFlow (HTTP / SDK).
 
-    TODO: appeler l'API RAGFlow pour dataset_id / retrieval ciblé par tags
-    de famille et réhydrater en `RetrievalHit` avec scores distants.
+    Non implémenté en V1 : tout appel lève `NotImplementedError`.
     """
 
     def __init__(self, base_url: str | None = None, api_key: str | None = None) -> None:
@@ -135,8 +169,11 @@ class RagflowWorkflowOrchestrator(BaseWorkflowOrchestrator):
         chunks: list[DocumentChunk],
         families: list[FieldFamily],
         top_k_per_family: int = 3,
+        tenant_id: str | None = None,  # noqa: ARG002
+        family_queries: dict[FieldFamily, str] | None = None,
     ) -> dict[FieldFamily, list[RetrievalHit]]:
+        _ = document_id, chunks, families, top_k_per_family, tenant_id, family_queries
         raise NotImplementedError(
-            "TODO: intégration RAGFlow — mapper document_id vers KB RAGFlow "
+            "Intégration RAGFlow non disponible : mapper document_id vers KB RAGFlow "
             "et traduire la réponse JSON en RetrievalHit."
         )
