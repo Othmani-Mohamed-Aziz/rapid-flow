@@ -36,6 +36,33 @@ class Settings(BaseSettings):
     #: Chemin JSON du schéma d'étude. Vide = `data/study_schema_default.json` ou dérivé du code exemple.
     study_schema_path: str | None = None
 
+    # ─── Export eCRF XLS (gabarit MA) ─────────────────────────────────────────
+    #: Gabarit XLSX MA (colonnes eCRF). Défaut : `data/MA_Base_example.xlsx`.
+    export_xlsx_template_path: str | None = None
+    #: Active l'export XLSX en plus du JSON / CSV mock.
+    export_xls_enabled: bool = True
+    export_xls_sheet_name: str = "Global_CC"
+    export_xls_header_row: int = 2
+    export_xls_patient_id_column: str = "ID_current_base"
+    export_xls_overwrite_policy: Literal["empty_only", "always", "never"] = "empty_only"
+    #: JSON ``{ "pipeline_patient_id": "ma_row_key" }`` pour ``ID_current_base``.
+    export_xls_patient_id_map_path: str | None = None
+    #: Si True et gabarit présent : erreur si aucune ligne MA pour la clé résolue.
+    export_xls_require_patient_in_ma: bool = True
+    #: Met à jour le gabarit MA sur disque (source de vérité). Si False, copie vers outputs/ uniquement.
+    export_xls_update_master_workbook: bool = True
+    #: Copie optionnelle du gabarit mis à jour dans le dossier ``outputs/<doc_id>/``.
+    export_xls_mirror_to_output: bool = False
+    #: JSON ``{ "schema_column": "MA_header" }`` — défaut + data/column_aliases_ma.json.
+    export_xls_column_aliases_path: str | None = None
+    #: Placeholders MA traités comme cellules vides (virgules).
+    empty_sentinels: str = "NA,N/A,-,A completer,A compléter,A verifier,A vérifier"
+
+    def parsed_empty_sentinels(self) -> frozenset[str]:
+        from app.etl.empty_sentinels import parse_empty_sentinels
+
+        return parse_empty_sentinels(self.empty_sentinels)
+
     #: `auto` = Docling si installé, sinon pypdf ; `docling` = Docling obligatoire ;
     #: `pypdf` = moteur texte léger uniquement.
     pdf_parser_backend: Literal["auto", "docling", "pypdf"] = "auto"

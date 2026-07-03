@@ -187,3 +187,5 @@ class PipelineResult(BaseModel):
     audit_trail: list[AuditRecord]
     export_paths: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    #: Clé ligne gabarit MA (``ID_current_base``) ; peut différer de ``patient_id``.
+    ma_patient_key: str | None = None

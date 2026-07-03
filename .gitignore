@@ -48,6 +48,8 @@ data/*
 !data/.gitkeep
 !data/README.md
 !data/study_schema_default.json
+!data/patient_id_map.demo.json
+!data/column_aliases_ma.json
 
 # ── Sorties pipeline ─────────────────────────────────────────────────────
 outputs/

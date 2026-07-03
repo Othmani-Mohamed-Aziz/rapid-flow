@@ -11,7 +11,21 @@ from app.business_rules.validation import ValidationService
 from app.config.field_registry import FieldRegistry
 from app.config.settings import Settings
 from app.config.study_schema_provider import resolve_study_schema
+from app.etl.column_aliases import resolve_column_aliases
+from app.etl.ecrf_export_policy import (
+    columns_to_skip_for_policy,
+    partition_cell_updates_for_ecrf,
+)
 from app.etl.export import EcrfExportService
+from app.etl.overwrite_policy import (
+    EcrfTemplateSnapshot,
+    XlsOverwritePolicy,
+    target_columns_for_document,
+)
+from app.etl.patient_resolver import (
+    ensure_ma_patient_in_template,
+    resolve_ma_patient_key,
+)
 from app.extraction.llama_extractor import LlamaExtractor
 from app.extraction.planner import field_families_from_jobs, plan_extraction_jobs
 from app.extraction.service import ExtractionService
@@ -105,10 +119,17 @@ class PipelineOrchestrator:
         self.mapping = FieldMappingService(self.registry)
         self.validation = ValidationService(self.registry)
         self.confidence = ConfidenceScoringService()
-        self.export_service = EcrfExportService()
+        self.export_service = EcrfExportService.from_settings(self.settings)
         self.audit = AuditTrailService(self.settings.pipeline_version)
 
-    def run(self, document_path: str, patient_id: str, study_id: str) -> PipelineResult:
+    def run(
+        self,
+        document_path: str,
+        patient_id: str,
+        study_id: str,
+        *,
+        ma_patient_key: str | None = None,
+    ) -> PipelineResult:
         audit: list[AuditRecord] = []
         if self.study_schema.study_id != study_id:
             _LOG.warning(
@@ -116,6 +137,14 @@ class PipelineOrchestrator:
                 study_id,
                 self.study_schema.study_id,
             )
+
+        ma_resolution = resolve_ma_patient_key(
+            patient_id,
+            self.settings,
+            ma_patient_key=ma_patient_key,
+        )
+        ensure_ma_patient_in_template(ma_resolution, self.settings)
+        ma_key = ma_resolution.ma_patient_key
 
         raw = self.ingestion.ingest(document_path, patient_id, study_id)
         audit.append(
@@ -188,7 +217,47 @@ class PipelineOrchestrator:
             )
         )
 
-        extraction_jobs = plan_extraction_jobs(self.study_schema, doc_type)
+        skip_columns: set[str] = set()
+        overwrite_policy = XlsOverwritePolicy(self.settings.export_xls_overwrite_policy)
+        snapshot = EcrfTemplateSnapshot.from_settings(self.settings, ma_patient_key=ma_key)
+        target_cols = target_columns_for_document(self.study_schema, doc_type)
+        skip_columns = columns_to_skip_for_policy(overwrite_policy, snapshot, target_cols)
+        column_aliases = resolve_column_aliases(self.settings)
+
+        if skip_columns and overwrite_policy == XlsOverwritePolicy.EMPTY_ONLY:
+            _LOG.info(
+                "eCRF prefilter (empty_only) : %d colonne(s) déjà remplies, extraction ignorée : %s",
+                len(skip_columns),
+                sorted(skip_columns),
+            )
+        elif overwrite_policy == XlsOverwritePolicy.NEVER and skip_columns:
+            _LOG.info(
+                "eCRF prefilter (never) : extraction eCRF ignorée pour %d colonne(s)",
+                len(skip_columns),
+            )
+
+        audit.append(
+            self.audit.record_step(
+                document_id=raw.document_id,
+                patient_id=patient_id,
+                study_id=study_id,
+                step="ecrf_prefilter",
+                details={
+                    "policy": overwrite_policy.value,
+                    "skipped_columns": sorted(skip_columns),
+                    "snapshot_available": snapshot.available,
+                    "empty_sentinels": sorted(self.settings.parsed_empty_sentinels()),
+                    "duplicate_headers": snapshot.duplicate_headers,
+                    **ma_resolution.to_metadata(),
+                },
+            )
+        )
+
+        extraction_jobs = plan_extraction_jobs(
+            self.study_schema,
+            doc_type,
+            exclude_target_columns=skip_columns,
+        )
         families = field_families_from_jobs(extraction_jobs)
         family_queries: dict = {}
         for fam in families:
@@ -222,6 +291,7 @@ class PipelineOrchestrator:
         observations = self.extraction.extract_all_for_document(
             doc_type=doc_type,
             family_hits=family_hits,
+            extraction_jobs=extraction_jobs,
         )
         for ob in observations:
             audit.append(
@@ -321,6 +391,27 @@ class PipelineOrchestrator:
                 )
             )
 
+        ecrf_updates, suppressed_updates = partition_cell_updates_for_ecrf(
+            validated_updates,
+            policy=overwrite_policy,
+            snapshot=snapshot,
+            column_aliases=column_aliases,
+        )
+        audit.append(
+            self.audit.record_step(
+                document_id=raw.document_id,
+                patient_id=patient_id,
+                study_id=study_id,
+                step="ecrf_export_policy",
+                details={
+                    "policy": overwrite_policy.value,
+                    "cell_updates_raw": len(validated_updates),
+                    "cell_updates_ecrf": len(ecrf_updates),
+                    "suppressed": suppressed_updates,
+                },
+            )
+        )
+
         output_dir = Path("outputs") / raw.document_id
         result = PipelineResult(
             document_id=raw.document_id,
@@ -328,12 +419,18 @@ class PipelineOrchestrator:
             study_id=study_id,
             document_type=doc_type,
             observations=observations,
-            cell_updates=validated_updates,
+            cell_updates=ecrf_updates,
             audit_trail=audit,
+            ma_patient_key=ma_key,
             metadata={
                 "document_path": str(Path(document_path).resolve()),
                 "study_schema_version": self.study_schema.schema_version,
                 "study_id_config": self.study_schema.study_id,
+                "export_xls_overwrite_policy": overwrite_policy.value,
+                "ecrf_skipped_columns": sorted(skip_columns),
+                "cell_updates_raw_count": len(validated_updates),
+                "cell_updates_suppressed": suppressed_updates,
+                **ma_resolution.to_metadata(),
             },
         )
         paths = self.export_service.export(result, output_dir)
@@ -349,6 +446,17 @@ class PipelineOrchestrator:
         return result.model_copy(update={"export_paths": paths, "audit_trail": audit})
 
 
-def run_pipeline(document_path: str, patient_id: str, study_id: str) -> PipelineResult:
+def run_pipeline(
+    document_path: str,
+    patient_id: str,
+    study_id: str,
+    *,
+    ma_patient_key: str | None = None,
+) -> PipelineResult:
     """Point d'entrée fonctionnel V1."""
-    return PipelineOrchestrator().run(document_path, patient_id, study_id)
+    return PipelineOrchestrator().run(
+        document_path,
+        patient_id,
+        study_id,
+        ma_patient_key=ma_patient_key,
+    )

@@ -95,10 +95,12 @@ class ExtractionService:
         *,
         doc_type: DocumentType,
         family_hits: dict[FieldFamily, list[RetrievalHit]],
+        extraction_jobs: list[ExtractionJob] | None = None,
     ) -> list[ExtractedObservation]:
         """Planifie et exécute tous les jobs pour un type documentaire."""
+        jobs = extraction_jobs if extraction_jobs is not None else self.plan_jobs(doc_type)
         all_obs: list[ExtractedObservation] = []
-        for job in self.plan_jobs(doc_type):
+        for job in jobs:
             hits = family_hits.get(job.field_family, [])
             all_obs.extend(self.extract_for_job(job, hits))
         return all_obs

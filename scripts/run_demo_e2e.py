@@ -78,13 +78,24 @@ def _run_document(
     patient_id: str,
     study_id: str,
     preview_chars: int,
+    ma_patient_key: str | None = None,
 ) -> PipelineResult | None:
     if not path.is_file():
         print(f"⚠️  {label} : fichier introuvable — {path}", file=sys.stderr)
         return None
     _print_section(f"Pipeline — {label}")
     print(f"  fichier : {path.resolve()}")
-    result = run_pipeline(str(path.resolve()), patient_id=patient_id, study_id=study_id)
+    if ma_patient_key:
+        print(f"  patient_id (pipeline) : {patient_id}")
+        print(f"  ma_patient_key (MA)   : {ma_patient_key}")
+    else:
+        print(f"  patient_id : {patient_id}")
+    result = run_pipeline(
+        str(path.resolve()),
+        patient_id=patient_id,
+        study_id=study_id,
+        ma_patient_key=ma_patient_key,
+    )
     _summarize_result(label, result, preview_chars=preview_chars)
     return result
 
@@ -101,7 +112,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--patient-id-imaging",
         default="PAT-DEMO-IMG",
-        help="Identifiant patient pour le CR imagerie.",
+        help="Identifiant patient pour le CR imagerie (traçabilité pipeline).",
+    )
+    parser.add_argument(
+        "--ma-patient-key",
+        default=None,
+        help=(
+            "Clé ligne MA (colonne ID_current_base), ex. 220. "
+            "Sinon résolution via data/patient_id_map.demo.json ou correspondance directe."
+        ),
     )
     parser.add_argument(
         "--preview-chars",
@@ -150,6 +169,7 @@ def main(argv: list[str] | None = None) -> int:
             patient_id=args.patient_id_lab,
             study_id=study_id,
             preview_chars=args.preview_chars,
+            ma_patient_key=args.ma_patient_key,
         )
         if r is not None:
             results.append(r)
@@ -161,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             patient_id=args.patient_id_imaging,
             study_id=study_id,
             preview_chars=args.preview_chars,
+            ma_patient_key=args.ma_patient_key,
         )
         if r is not None:
             results.append(r)

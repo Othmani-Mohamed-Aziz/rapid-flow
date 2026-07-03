@@ -14,13 +14,20 @@ from app.schemas.study_schema import (
 def plan_extraction_jobs(
     study_schema: StudySchema,
     doc_type: DocumentType,
+    *,
+    exclude_target_columns: set[str] | frozenset[str] | None = None,
 ) -> list[ExtractionJob]:
     """
     Regroupe les champs extractibles du schéma par (stratégie, field_family).
 
     Un job = une stratégie d'extracteur + une famille pour le retrieval / dédup.
     """
-    fields = study_schema.extractable_fields_for_document_type(doc_type)
+    excluded = frozenset(exclude_target_columns or ())
+    fields = [
+        f
+        for f in study_schema.extractable_fields_for_document_type(doc_type)
+        if f.target_column not in excluded
+    ]
     buckets: dict[tuple[ExtractionStrategy, FieldFamily], list[StudyFieldDefinition]] = {}
 
     for f in fields:

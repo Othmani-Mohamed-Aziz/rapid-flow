@@ -1,0 +1,6 @@
+{
+  "Response_at_first_imaging_RECIST": "Response_at_the_first_imaging_RECIST",
+  "Response_at_second_imaging_RECIST": "Response_at_the_second_imaging_RECIST",
+  "Response_at_first_imaging_mRECIST": "Response_at_the_first_imaging_mRECIST",
+  "Response_at_second_imaging_mRECIST": "Response_at_the_second_imaging_mRECIST"
+}

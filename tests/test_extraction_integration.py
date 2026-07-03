@@ -26,7 +26,9 @@ pytestmark = pytest.mark.extraction_integration
 def test_pipeline_lab_end_to_end_with_default_schema() -> None:
     if not MOCK_BLOOD_PANEL_TXT.is_file():
         pytest.skip(f"Fixture manquant : {MOCK_BLOOD_PANEL_TXT}")
-    result = PipelineOrchestrator(settings=Settings(langextract_enabled=False)).run(
+    result = PipelineOrchestrator(
+        settings=Settings(langextract_enabled=False, export_xls_require_patient_in_ma=False),
+    ).run(
         str(MOCK_BLOOD_PANEL_TXT),
         patient_id="P-LAB",
         study_id="EXAMPLE",
@@ -72,7 +74,7 @@ def test_pipeline_imaging_mocked_langextract(mock_run_lx) -> None:
     schema = resolve_study_schema(DEFAULT_SCHEMA_PATH)
     registry = FieldRegistry.from_study_schema(schema)
     orch = PipelineOrchestrator(
-        settings=Settings(langextract_enabled=True),
+        settings=Settings(langextract_enabled=True, export_xls_require_patient_in_ma=False),
         registry=registry,
         study_schema=schema,
     )
@@ -100,7 +102,7 @@ def test_pipeline_study_id_mismatch_still_runs(caplog) -> None:
     schema = resolve_study_schema(DEFAULT_SCHEMA_PATH)
     with caplog.at_level("WARNING"):
         result = PipelineOrchestrator(
-            settings=Settings(langextract_enabled=False),
+            settings=Settings(langextract_enabled=False, export_xls_require_patient_in_ma=False),
             study_schema=schema,
         ).run(str(MOCK_BLOOD_PANEL_TXT), patient_id="P1", study_id="OTHER_STUDY")
     assert result.observations
@@ -115,7 +117,7 @@ def test_workflow_retrieval_uses_schema_queries() -> None:
 
     schema = resolve_study_schema(DEFAULT_SCHEMA_PATH)
     orch = PipelineOrchestrator(
-        settings=Settings(langextract_enabled=False),
+        settings=Settings(langextract_enabled=False, export_xls_require_patient_in_ma=False),
         workflow=LocalWorkflowOrchestrator(),
         study_schema=schema,
     )
