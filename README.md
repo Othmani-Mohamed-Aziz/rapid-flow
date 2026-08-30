@@ -3,6 +3,10 @@
 Pipeline **orientée routing, extraction spécialisée par famille de champs et traçabilité**, sans prompt monolithique sur l'intégralité du document.
 
 > Toutes les commandes opérationnelles (Docker, CI, pre-commit, debug) sont listées dans [`useful_commands.md`](./useful_commands.md).
+>
+> Le bilan technique du stage, les résultats avant/après et le guide de
+> reproduction pour le superviseur sont dans
+> [`docs/INTERNSHIP_HANDOVER.md`](./docs/INTERNSHIP_HANDOVER.md).
 
 ---
 
@@ -20,7 +24,7 @@ flowchart LR
   IDX --> RET["Retrieval<br/>dense + BM25 + rerank"]
   RET --> EXT["Extraction<br/>StudySchema"]
   EXT --> BR["Règles métier<br/>mapping · norm · score"]
-  BR --> ETL["ETL<br/>JSON · CSV mock"]
+  BR --> ETL["ETL<br/>JSON · CSV · XLS"]
 
   style EXT fill:#e8f4fc,stroke:#1a73e8
   style BR fill:#fef7e0,stroke:#f9ab00
@@ -51,7 +55,7 @@ flowchart TB
 - **Index / retrieval** : `app/indexing` (`InMemoryVectorIndexService` pour dev, `QdrantHybridVectorService` pour prod), `app/retrieval` (`RetrievalService`, orchestrateurs de workflow).
 - **Extraction** : `app/extraction` — pilotée par `StudySchema` (JSON) : jobs par stratégie/famille, chunks RAG uniquement (`ExtractionService`, `plan_extraction_jobs`, stratégies lab / narratif / imagerie LangExtract+Ollama).
 - **Règles métier** : `app/business_rules` (temporalité, mapping champs, validation, score).
-- **ETL sortie** : `app/etl` (JSON + CSV mock ; XLS prévu).
+- **ETL sortie** : `app/etl` (JSON, CSV mock, XLS réel et templates d'évaluation).
 - **Orchestration** : `app/orchestration/pipeline.py` (`run_pipeline`).
 - **Schémas** : `app/schemas` (Pydantic v2), dont `StudySchema` + `ExtractionCatalog`.
 - **Schéma d'étude** : `data/study_schema_default.json` (ou `ECRF_STUDY_SCHEMA_PATH`) ; `app/config/ecrf_fields.py` sert au bootstrap / démo uniquement.
@@ -178,7 +182,7 @@ flowchart LR
 
 ## Scripts de démo (par étape pipeline)
 
-Trois scripts couvrent **des tranches différentes** de la chaîne. Seul `run_demo_e2e.py` exécute la pipeline **métier complète** (`PipelineOrchestrator`).
+Cinq scripts couvrent **des tranches différentes** de la chaîne. `run_demo_e2e.py` exécute la pipeline **métier complète** sur les documents de démonstration ; `run_dataset_extraction.py` la rejoue sur un dataset apparié avant que `run_evaluation.py` calcule les métriques.
 
 ```mermaid
 flowchart LR
@@ -212,6 +216,8 @@ flowchart LR
 | **`run_demo_parsing.py`** | ingestion → parsing → chunking | Non | Python + deps parsing | PDF/TXT (argument) |
 | **`run_demo_retrieval.py`** | + index Qdrant hybride + retrieval + dumps JSON | Non | Qdrant + modèles HF (~1,5 Go) | `data/ct_scan_report_liver.pdf` |
 | **`run_demo_e2e.py`** | pipeline produit complète via `run_pipeline()` | **Oui** (lab + imagerie) | deps de base ; Ollama pour RECIST ; Qdrant si `ECRF_VECTOR_BACKEND=qdrant` | `mock_blood_panel.txt` + `data/ct_scan_report_liver.pdf` |
+| **`run_dataset_extraction.py`** | pipeline complète en lot → `extracted/` | **Oui** | mêmes prérequis que les documents du dataset | dataset apparié passé par `--dataset-root` |
+| **`run_evaluation.py`** | appariement dataset → métriques champs/valeurs + Recall@k silver | Non (prédictions sauvegardées) | deps de base ; backend retrieval configuré sauf `--skip-retrieval` | `data/{reports,filtered_templates,extracted}` |
 
 ### `run_demo_parsing.py` — parsing seul
 
@@ -256,6 +262,42 @@ PDF imagerie seul (sans le script) :
 python -c "from app.config.settings import Settings; from app.config.study_schema_provider import resolve_study_schema; from app.orchestration.pipeline import run_pipeline; s=resolve_study_schema(Settings().study_schema_path); print(run_pipeline('data/ct_scan_report_liver.pdf', 'PAT-1', s.study_id).export_paths)"
 ```
 
+### `run_evaluation.py` — évaluation automatique du dataset
+
+Le script apparie les fichiers par `sample_id` :
+
+```text
+data/reports/<sample_id>.pdf
+data/filtered_templates/empty/<sample_id>_template_empty.json
+data/filtered_templates/filled/<sample_id>_template_filled.json
+data/extracted/<sample_id>_template.json
+```
+
+Le template vide définit les champs évaluables, le template rempli et vérifié est le gold,
+et `extracted/` contient les prédictions sauvegardées. Les champs extraits hors template sont
+signalés mais exclus des métriques de présence.
+
+```powershell
+# Rejouer la pipeline sur tous les PDF labellisés et créer `extracted/`
+python scripts\run_dataset_extraction.py --dataset-root data --workers 2 --overwrite
+
+# Évaluer les prédictions sauvegardées
+python scripts\run_evaluation.py
+python scripts\run_evaluation.py --skip-retrieval
+python scripts\run_evaluation.py --k 1 3 5 --min-f1 0.90 --min-value-accuracy 0.95
+```
+
+Le rapport `outputs/evaluation/<run_id>/evaluation_report.json` contient les résultats par
+échantillon, les agrégats micro/macro, les TP/FP/FN, le taux de validation contractuelle,
+le taux d'autofill, le false-autofill, précision/rappel/F1 et l'accuracy des valeurs.
+
+`silver_recall_at_k` n'est pas une annotation humaine : les qrels sont dérivées avant le
+classement en recherchant un couple exact libellé + valeur gold dans les chunks, puis les
+chunks sont classés avec les requêtes de famille utilisées en production. Les champs sans
+correspondance unique ou sans famille de retrieval supportée sont exclus du dénominateur et
+listés comme `unmatched`, `ambiguous` ou `unsupported_family`. Utiliser `--skip-retrieval`
+pour ne calculer que les métriques de champs.
+
 ### Quel script choisir ?
 
 | Besoin | Script |
@@ -263,6 +305,8 @@ python -c "from app.config.settings import Settings; from app.config.study_schem
 | « Mon PDF est-il bien parsé ? » | `run_demo_parsing.py` |
 | « Qdrant retrouve-t-il les bonnes sections ? » | `run_demo_retrieval.py` |
 | « Le pipeline remplit-il les champs eCRF ? » | `run_demo_e2e.py` |
+| « Comment régénérer toutes les prédictions d'un dataset ? » | `run_dataset_extraction.py` |
+| « Quelle est la qualité agrégée des extractions sauvegardées ? » | `run_evaluation.py` |
 
 > **`run_demo_e2e.py` ≠ `run_demo_retrieval.py` + extraction.** L'e2e utilise `PipelineOrchestrator` (retrieval piloté par le StudySchema, pas les requêtes ad hoc du script retrieval). Le script retrieval ajoute des outils de debug Qdrant absents de l'e2e (`health_check`, `list_chunks`, dumps JSON).
 

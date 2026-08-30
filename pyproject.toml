@@ -67,6 +67,7 @@ markers = [
   "optional_user_pdf: parse un PDF fourni via ECRF_TEST_PDF_PATH ou tests/fixtures/local_lab.pdf",
   "ct_integration_pdf: intégration sur data/ct_scan_report_liver.pdf (ou ECRF_CT_TEST_PDF_PATH)",
   "extraction_integration: intégration phase extraction (pipeline + schéma, LangExtract mocké)",
+  "evaluation: évaluation offline déterministe sur templates gold et prédictions sauvegardées",
   "real_vector_backend: test opt-in qui utilise un vrai backend vector store (Qdrant + fastembed/torch) ; sinon les tests sont forcés en mode `memory` pour isolation",
 ]
 

@@ -44,16 +44,16 @@ def test_ct_scan_pypdf_extracts_substantial_text(ct_scan_raw_document) -> None:
 @pytest.mark.skipif(not CT_SCAN_REPORT_LIVER_PDF.is_file(), reason="PDF CT absent")
 def test_ct_scan_pypdf_routed_as_narrative_chunking(ct_scan_raw_document) -> None:
     parsed = SmartParsingService(Settings(pdf_parser_backend="pypdf")).parse(ct_scan_raw_document)
-    assert parsed.metadata.get("chunking_strategy") == "sections"
+    assert parsed.metadata.get("chunking_strategy") == "imaging_full"
     chunks = DefaultChunkingService(Settings()).chunk(parsed)
     assert chunks
-    assert chunks[0].metadata.get("chunker") == "SectionBasedChunkingService"
+    assert chunks[0].metadata.get("chunker") == "ImagingReportChunkingService"
 
 
 def test_docling_parses_ct_scan_metadata(ct_scan_parsed_docling) -> None:
     parsed = ct_scan_parsed_docling
     assert parsed.metadata.get("pdf_parser") == "docling"
-    assert parsed.metadata.get("chunking_strategy") == "sections"
+    assert parsed.metadata.get("chunking_strategy") == "imaging_full"
     assert parsed.metadata.get("full_text_source") == "assembled_structured_sections"
     assert "lab_document_score" in parsed.metadata
 
@@ -76,7 +76,7 @@ def test_docling_ct_scan_not_classified_as_lab(ct_scan_parsed_docling) -> None:
     original = (parsed.metadata or {}).get("full_text_original_markdown") or ""
     assert original, "le markdown d'origine doit être conservé en métadonnée"
     assert is_probable_lab_document(original[:18000]) is False
-    assert parsed.metadata.get("chunking_strategy") == "sections"
+    assert parsed.metadata.get("chunking_strategy") == "imaging_full"
     assert not (parsed.structured_lab_lines or [])
 
 

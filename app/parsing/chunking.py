@@ -123,6 +123,42 @@ class HeuristicLabChunkingService(ChunkingService):
         return f"chk_{h}"
 
 
+class LabRowChunkingService(ChunkingService):
+    """Keep reconstructed analyte labels and values together, grouped by subsection."""
+
+    def __init__(self) -> None:
+        self._family_inference = HeuristicLabChunkingService()
+
+    def chunk(self, parsed: ParsedDocument) -> list[DocumentChunk]:
+        grouped: dict[tuple[str | None, str | None], list[str]] = {}
+        for line in parsed.structured_lab_lines:
+            grouped.setdefault((line.section, line.subsection), []).append(line.raw_text)
+        chunks: list[DocumentChunk] = []
+        for index, ((section, subsection), rows) in enumerate(grouped.items()):
+            text = "\n".join(rows)
+            chunk_id = HeuristicLabChunkingService._stable_chunk_id(
+                f"{parsed.document_id}:lab_rows:{index}",
+                text,
+            )
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=chunk_id,
+                    document_id=parsed.document_id,
+                    text=text,
+                    field_family=self._family_inference._infer_family(text),
+                    metadata={
+                        "chunker": "LabRowChunkingService",
+                        "content_kind": "structured_lab_rows",
+                        "section_heading": section,
+                        "subsection_heading": subsection,
+                        "row_count": len(rows),
+                        "char_spans_verified": False,
+                    },
+                )
+            )
+        return chunks or self._family_inference.chunk(parsed)
+
+
 def _split_oversized_body(text: str, max_chars: int) -> list[str]:
     """Découpe un corps de section long sans couper au milieu d’un paragraphe si possible."""
     if len(text) <= max_chars:
@@ -157,6 +193,47 @@ def _split_oversized_body(text: str, max_chars: int) -> list[str]:
     if buf:
         out.append(buf)
     return out
+
+
+class ImagingReportChunkingService(ChunkingService):
+    """Keep short imaging reports intact so related RECIST evidence stays together."""
+
+    def __init__(self, *, max_chars: int = 12000) -> None:
+        self._max_chars = max_chars
+
+    def chunk(self, parsed: ParsedDocument) -> list[DocumentChunk]:
+        full = (parsed.full_text or "").strip()
+        if not full:
+            return []
+        parts = _split_oversized_body(full, self._max_chars)
+        chunks: list[DocumentChunk] = []
+        offset = 0
+        for index, part in enumerate(parts):
+            start = full.find(part, offset)
+            end = start + len(part) if start >= 0 else None
+            chunk_id = HeuristicLabChunkingService._stable_chunk_id(
+                f"{parsed.document_id}:imaging:{index}",
+                part,
+            )
+            chunks.append(
+                DocumentChunk(
+                    chunk_id=chunk_id,
+                    document_id=parsed.document_id,
+                    text=part,
+                    field_family=FieldFamily.IMAGING_RECIST,
+                    char_start=start if start >= 0 else None,
+                    char_end=end,
+                    metadata={
+                        "chunker": "ImagingReportChunkingService",
+                        "content_kind": "imaging_report",
+                        "part_index": index,
+                        "char_spans_verified": start >= 0,
+                    },
+                )
+            )
+            if end is not None:
+                offset = end
+        return chunks
 
 
 class SectionBasedChunkingService(ChunkingService):
@@ -271,11 +348,20 @@ class DefaultChunkingService(ChunkingService):
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings()
         self._lab = HeuristicLabChunkingService()
+        self._lab_rows = LabRowChunkingService()
+        self._imaging = ImagingReportChunkingService(
+            max_chars=self.settings.chunk_max_section_chars,
+        )
         self._sections = SectionBasedChunkingService(
             max_section_chars=self.settings.chunk_max_section_chars,
         )
 
     def chunk(self, parsed: ParsedDocument) -> list[DocumentChunk]:
-        if parsed.metadata.get("chunking_strategy") == "sections":
+        strategy = parsed.metadata.get("chunking_strategy")
+        if strategy == "sections":
             return self._sections.chunk(parsed)
+        if strategy == "lab_rows":
+            return self._lab_rows.chunk(parsed)
+        if strategy == "imaging_full":
+            return self._imaging.chunk(parsed)
         return self._lab.chunk(parsed)

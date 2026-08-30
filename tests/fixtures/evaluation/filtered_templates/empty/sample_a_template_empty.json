@@ -1,0 +1,16 @@
+{
+  "Hematologie": {
+    "NumerationGlobulaire": {
+      "Globules rouges": {
+        "valeur": null,
+        "unité": "10^6/mm3"
+      }
+    },
+    "NumerationPlaquettaire": {
+      "Plaquettes": {
+        "valeur": null,
+        "unité": "G/L"
+      }
+    }
+  }
+}

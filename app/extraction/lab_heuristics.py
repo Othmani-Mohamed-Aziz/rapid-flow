@@ -7,6 +7,7 @@ Les patterns lab sont pilotés par `StudySchema.extraction_catalog` (ou défauts
 from __future__ import annotations
 
 import re
+import unicodedata
 import uuid
 from typing import Any
 
@@ -62,6 +63,34 @@ _BUILTIN_LAB_SPECS: list[LabAnalyteSpec] = [
     ),
 ]
 
+_LAB_NAME_ALIASES: dict[str, str] = {
+    "ast": "AST",
+    "asat": "AST",
+    "transaminase asat s g o t": "AST",
+    "alt": "ALT",
+    "alat": "ALT",
+    "transaminase alat s g p t": "ALT",
+    "bilirubine totale": "Total_bilirubine",
+    "total bilirubin": "Total_bilirubine",
+    "plaquettes": "PLT",
+    "plt": "PLT",
+    "crp": "CRP",
+    "crp 3eme generation": "CRP",
+    "inr": "INR",
+    "afp": "AFP",
+    "alpha foetoproteine": "AFP",
+}
+
+_CANONICAL_FAMILIES: dict[str, FieldFamily] = {
+    "AST": FieldFamily.HEPATIC_BIOCHEMISTRY,
+    "ALT": FieldFamily.HEPATIC_BIOCHEMISTRY,
+    "Total_bilirubine": FieldFamily.HEPATIC_BIOCHEMISTRY,
+    "PLT": FieldFamily.HEMATOLOGY,
+    "AFP": FieldFamily.INFLAMMATION_BIOMARKERS,
+    "CRP": FieldFamily.INFLAMMATION_BIOMARKERS,
+    "INR": FieldFamily.COAGULATION,
+}
+
 _DEFAULT_NARRATIVE_SPECS: list[NarrativeKeywordSpec] = [
     NarrativeKeywordSpec(
         canonical_key="Cirrhosis",
@@ -76,6 +105,43 @@ def builtin_lab_analyte_specs() -> list[LabAnalyteSpec]:
 
 def builtin_narrative_specs() -> list[NarrativeKeywordSpec]:
     return list(_DEFAULT_NARRATIVE_SPECS)
+
+
+def _normalized_lab_name(name: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", name.casefold())
+    ascii_like = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", ascii_like).strip()
+
+
+def canonical_lab_key_for_name(name: str) -> str | None:
+    """Resolve common French/English analyte labels to study-schema canonical keys."""
+    normalized = _normalized_lab_name(name)
+    direct = _LAB_NAME_ALIASES.get(normalized)
+    if direct is not None:
+        return direct
+    tokens = set(normalized.split())
+    if "asat" in tokens:
+        return "AST"
+    if "alat" in tokens:
+        return "ALT"
+    return None
+
+
+def lab_field_family(
+    *,
+    section: str | None,
+    canonical_key: str | None,
+) -> FieldFamily:
+    if canonical_key in _CANONICAL_FAMILIES:
+        return _CANONICAL_FAMILIES[canonical_key]
+    normalized_section = _normalized_lab_name(section or "")
+    if normalized_section == "hematologie":
+        return FieldFamily.HEMATOLOGY
+    if normalized_section == "hemostase":
+        return FieldFamily.COAGULATION
+    if normalized_section == "biochimie":
+        return FieldFamily.HEPATIC_BIOCHEMISTRY
+    return FieldFamily.INFLAMMATION_BIOMARKERS
 
 
 # Rétrocompat tests / imports historiques.

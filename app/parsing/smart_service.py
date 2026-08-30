@@ -14,6 +14,7 @@ from app.parsing.lab_post_processor import LabReportPostProcessor
 from app.parsing.pdf.resilient import ensure_non_empty_text, parse_pdf_bytes_resilient
 from app.parsing.structuring import DocumentStructuringService
 from app.parsing.text_enrichment import extract_document_date
+from app.schemas.enums import DocumentType
 from app.schemas.models import ParsedDocument, RawDocument
 
 
@@ -109,10 +110,16 @@ class SmartParsingService(ParsingService):
         meta["lab_document_score"] = lab_document_score(sample)
         meta["imaging_or_morpho_context"] = imaging_or_morpho_context(sample)
 
-        if _is_pdf(raw) and not is_lab:
-            meta["chunking_strategy"] = "sections"
+        if _is_pdf(raw):
+            if is_lab:
+                meta["chunking_strategy"] = "lab_rows"
+            elif parsed.document_type_hint == DocumentType.IMAGING_REPORT:
+                meta["chunking_strategy"] = "imaging_full"
+            else:
+                meta["chunking_strategy"] = "sections"
             parsed = parsed.model_copy(update={"metadata": meta})
-            parsed = _align_full_text_to_structured_sections(parsed)
+            if not is_lab:
+                parsed = _align_full_text_to_structured_sections(parsed)
         else:
             meta.pop("chunking_strategy", None)
             parsed = parsed.model_copy(update={"metadata": meta})

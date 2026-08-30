@@ -25,8 +25,13 @@ def _fake_extraction(
     extraction_text: str,
     attributes: dict | None = None,
     grounded: bool = True,
+    start_pos: int | None = None,
 ) -> SimpleNamespace:
-    char_iv = SimpleNamespace(start_pos=0, end_pos=len(extraction_text)) if grounded else None
+    if not grounded:
+        char_iv = None
+    else:
+        start = 0 if start_pos is None else start_pos
+        char_iv = SimpleNamespace(start_pos=start, end_pos=start + len(extraction_text))
     return SimpleNamespace(
         extraction_class=extraction_class,
         extraction_text=extraction_text,
@@ -254,3 +259,124 @@ def test_extraction_service_imaging_per_chunk() -> None:
     assert mock_imaging.extract_chunk.call_count == 2
     assert mock_imaging.extract_chunk.call_args_list[0].kwargs["source_chunk_id"] == "a"
     assert mock_imaging.extract_chunk.call_args_list[1].kwargs["source_chunk_id"] == "b"
+
+
+def test_parse_cm_span_converts_to_mm() -> None:
+    from app.extraction.imaging_langextract import _parse_mm_value
+
+    assert _parse_mm_value("9,6 cm", {"value_mm": 9.6}) == 96
+    assert _parse_mm_value("5.3 cm", None) == 53
+    assert _parse_mm_value("28 mm", {"value_mm": 28}) == 28
+    assert _parse_mm_value("53 millimètres", None) == 53
+
+
+def test_extractions_convert_cm_and_prefer_baseline_size() -> None:
+    source = (
+        "Lésion cible n°1 (référence J0 / D0) : nodule du foie mesuré à 9,6 cm "
+        "au scanner initial. Sur l'examen actuel, la même cible mesure 61 mm. "
+        "Lésion non cible : adénopathie mesurant 18 mm."
+    )
+    baseline = "9,6 cm"
+    current = "61 mm"
+    nontarget = "18 mm"
+    obs = extractions_to_observations(
+        [
+            _fake_extraction(
+                extraction_class="lesion_size_mm",
+                extraction_text=current,
+                attributes={"value_mm": 61},
+                start_pos=source.index(current),
+            ),
+            _fake_extraction(
+                extraction_class="lesion_size_mm",
+                extraction_text=baseline,
+                attributes={"value_mm": 9.6},
+                start_pos=source.index(baseline),
+            ),
+            _fake_extraction(
+                extraction_class="lesion_size_mm",
+                extraction_text=nontarget,
+                attributes={"value_mm": 18},
+                start_pos=source.index(nontarget),
+            ),
+        ],
+        source_chunk_id="c-size",
+        model_name="m",
+        schema_version="v1",
+        source_text=source,
+    )
+    sizes = [o for o in obs if o.extra.get("canonical_imaging_key") == CANONICAL_LESION_SIZE_MM]
+    by_value = {o.normalized_value: o for o in sizes}
+    assert 96 in by_value
+    assert by_value[96].confidence > by_value[61].confidence
+    assert by_value[96].confidence > by_value[18].confidence
+
+
+def test_extractions_ignore_indication_recist_and_use_conclusion() -> None:
+    source = (
+        "Indication : suspicion clinique de PD.\n"
+        "Impression morphologique : majoration des lésions.\n"
+        "CONCLUSION : Selon RECIST 1.1, la réponse officielle retenue est "
+        "non évaluable (NE)."
+    )
+    obs = extractions_to_observations(
+        [
+            _fake_extraction(
+                extraction_class="recist_response",
+                extraction_text="PD",
+                start_pos=source.index("PD"),
+            ),
+            _fake_extraction(
+                extraction_class="recist_response",
+                extraction_text="non évaluable (NE)",
+                start_pos=source.index("non évaluable (NE)"),
+            ),
+        ],
+        source_chunk_id="c-recist",
+        model_name="m",
+        schema_version="v1",
+        source_text=source,
+    )
+    recist = [o for o in obs if o.extra.get("canonical_imaging_key") == CANONICAL_RECIST_RESPONSE]
+    assert {o.normalized_value for o in recist} == {"NE"}
+
+
+def test_source_fallback_reads_baseline_cm_and_conclusion_ne() -> None:
+    source = (
+        "Indication : suspicion clinique de PD. "
+        "Au bilan d'inclusion, la lésion cible index était chiffrée à 8,7 cm. "
+        "Sur l'examen actuel, la même cible mesure 40 mm. "
+        "CONCLUSION : Selon RECIST 1.1, la réponse officielle retenue est "
+        "non évaluable (NE)."
+    )
+    obs = extractions_to_observations(
+        [
+            _fake_extraction(
+                extraction_class="lesion_size_mm",
+                extraction_text="40 mm",
+                attributes={"value_mm": 40},
+                start_pos=source.index("40 mm"),
+            ),
+            _fake_extraction(
+                extraction_class="recist_response",
+                extraction_text="PD",
+                start_pos=source.index("PD"),
+            ),
+        ],
+        source_chunk_id="c-fb",
+        model_name="m",
+        schema_version="v1",
+        source_text=source,
+    )
+    sizes = [
+        o.normalized_value
+        for o in obs
+        if o.extra.get("canonical_imaging_key") == CANONICAL_LESION_SIZE_MM
+    ]
+    recist = [
+        o.normalized_value
+        for o in obs
+        if o.extra.get("canonical_imaging_key") == CANONICAL_RECIST_RESPONSE
+    ]
+    assert 87 in sizes
+    assert recist == ["NE"]

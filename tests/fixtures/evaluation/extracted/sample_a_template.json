@@ -1,0 +1,20 @@
+{
+  "Hematologie": {
+    "NumerationGlobulaire": {
+      "Globules rouges": {
+        "valeur": 4.4,
+        "unité": "10^6/mm3"
+      },
+      "Hematocrite": {
+        "valeur": 42.0,
+        "unité": "%"
+      }
+    },
+    "NumerationPlaquettaire": {
+      "Plaquettes": {
+        "valeur": 150,
+        "unité": "G/L"
+      }
+    }
+  }
+}

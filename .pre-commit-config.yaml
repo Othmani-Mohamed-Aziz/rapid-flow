@@ -33,7 +33,10 @@ repos:
     hooks:
       - id: ruff
         args: [--fix]
+        # Export Colab conservé tel quel (`!pip`, drive.mount).
+        exclude: ^ctreport\.py$
       - id: ruff-format
+        exclude: ^ctreport\.py$
 
   # ── Mypy (type check) ──────────────────────────────────────────────────
   # On lance via le venv local pour aligner les versions de deps types

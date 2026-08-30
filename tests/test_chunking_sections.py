@@ -4,7 +4,7 @@ from datetime import date
 
 from app.parsing.chunking import DefaultChunkingService, SectionBasedChunkingService
 from app.schemas.enums import DocumentType
-from app.schemas.models import DocumentSection, ParsedDocument
+from app.schemas.models import DocumentSection, ParsedDocument, StructuredLabLine
 
 
 def _parsed_narrative(*, strategy: str | None = "sections") -> ParsedDocument:
@@ -89,3 +89,34 @@ def test_default_chunking_lab_heuristic_when_no_strategy() -> None:
     )
     chunks = DefaultChunkingService().chunk(parsed)
     assert chunks[0].metadata.get("chunker") == "HeuristicLabChunkingService"
+
+
+def test_default_chunking_groups_complete_lab_rows_by_subsection() -> None:
+    parsed = _parsed_narrative(strategy="lab_rows").model_copy(
+        update={
+            "structured_lab_lines": [
+                StructuredLabLine(
+                    name="AST",
+                    value=28.5,
+                    unit="U/L",
+                    section="Biochimie",
+                    subsection="Biochimie",
+                    raw_text="AST | 28.5 U/L",
+                ),
+                StructuredLabLine(
+                    name="ALT",
+                    value=10,
+                    unit="U/L",
+                    section="Biochimie",
+                    subsection="Biochimie",
+                    raw_text="ALT | 10 U/L",
+                ),
+            ]
+        }
+    )
+
+    chunks = DefaultChunkingService().chunk(parsed)
+
+    assert len(chunks) == 1
+    assert chunks[0].text == "AST | 28.5 U/L\nALT | 10 U/L"
+    assert chunks[0].metadata["chunker"] == "LabRowChunkingService"

@@ -53,8 +53,10 @@ data/*
 
 # ── Sorties pipeline ─────────────────────────────────────────────────────
 outputs/
+Synthetic_Body_CT_Reports/
 
 # ── Fichiers temporaires de debug ────────────────────────────────────────
+parsed.json
 parsed_*.json
 *.log
 *.tmp

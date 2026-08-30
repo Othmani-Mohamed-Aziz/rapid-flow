@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.extraction.imaging_langextract import _normalize_recist_label
+from app.extraction.imaging_langextract import _normalize_recist_label, _parse_mm_value
 from app.schemas.models import ExtractedObservation, FieldDefinition
 from app.schemas.study_schema import _RECIST_CANON_CODES
 
@@ -24,16 +24,22 @@ class NormalizationService:
                     return observation.model_copy(update={"normalized_value": norm})
             return observation
         if rule == "numeric_mm" and val is not None:
-            try:
-                num = float(str(val).replace(",", "."))
-                return observation.model_copy(
-                    update={
-                        "normalized_value": int(num) if num.is_integer() else num,
-                        "unit": observation.unit or "mm",
-                    }
-                )
-            except (TypeError, ValueError):
-                return observation
+            parsed = _parse_mm_value(
+                observation.evidence_text or observation.raw_value or "",
+                {"value_mm": val, "unit": observation.unit},
+            )
+            if parsed is None:
+                try:
+                    parsed = float(str(val).replace(",", "."))
+                    parsed = int(parsed) if parsed.is_integer() else parsed
+                except (TypeError, ValueError):
+                    return observation
+            return observation.model_copy(
+                update={
+                    "normalized_value": parsed,
+                    "unit": observation.unit or "mm",
+                }
+            )
         if rule == "bool_yes_no":
             if isinstance(val, bool):
                 return observation

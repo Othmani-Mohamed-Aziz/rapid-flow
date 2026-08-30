@@ -46,6 +46,7 @@ class StructuredLabLine(BaseModel):
     value: str | float | int | None = None
     unit: str | None = None
     section: str | None = None
+    subsection: str | None = None
     raw_text: str
     confidence: float = Field(default=0.78, ge=0.0, le=1.0)
 

@@ -80,6 +80,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      - name: Evaluation synthetic fixtures
+        env:
+          ECRF_VECTOR_BACKEND: memory
+          ECRF_ENABLE_SPARSE_BM25: "false"
+          ECRF_ENABLE_RERANKER: "false"
+        run: pytest -q -m evaluation
+
       # ⚠️ Job unit volontairement « smoke » : sans extras lourds (vector,
       # docling) pour rester rapide. Du coup la couverture globale chute (les
       # modules optionnels ne sont jamais importés). On ne met PAS de gate

@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     export_xlsx_template_path: str | None = None
     #: Active l'export XLSX en plus du JSON / CSV mock.
     export_xls_enabled: bool = True
+    #: Émet le JSON labo imbriqué Section/Subsection/Analyte pour les bilans.
+    export_lab_template_json_enabled: bool = True
+    #: Émet le JSON imagerie imbriqué attendu par l'évaluation RECIST.
+    export_imaging_template_json_enabled: bool = True
     export_xls_sheet_name: str = "Global_CC"
     export_xls_header_row: int = 2
     export_xls_patient_id_column: str = "ID_current_base"

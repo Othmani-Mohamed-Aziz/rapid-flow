@@ -150,8 +150,7 @@ class XlsEcrfExporter:
                 )
             if self.patient_id_column not in header_map:
                 msg = (
-                    f"Colonne patient {self.patient_id_column!r} absente "
-                    f"(ligne {self.header_row})"
+                    f"Colonne patient {self.patient_id_column!r} absente (ligne {self.header_row})"
                 )
                 raise XlsExportError(msg)
 

@@ -17,7 +17,6 @@ Table de suivi des briques **non implémentées**, **partielles** ou **à renfor
 
 | Titre | Description | Impact | Priorité |
 |-------|-------------|--------|----------|
-| Export XLS eCRF réel | Implémenter `XlsExportPlaceholder` dans `app/etl/export.py` avec `openpyxl` / `xlsxwriter` : écrire les `cell_updates` dans le gabarit eCRF attendu (colonnes MA, feuilles par visite). | Sans cela, seul un CSV mock est produit ; pas d’injection directe dans l’eCRF clinique. | **P0** |
 | Adaptateur MA_Base → StudySchema | Générer `study_schema_<study_id>.json` depuis `data/MA_Base_example.xlsx` (mapping colonnes, familles, seuils, requêtes RAG). | Réduit la saisie manuelle du schéma et aligne le pipeline sur la base métier réelle. | **P0** |
 | API HTTP pipeline | Exposer `POST /pipeline/run` (FastAPI) via `app/api/` : upload document, paramètres `patient_id` / `study_id`, retour `PipelineResult` ou job async. | Aujourd’hui usage script-only ; bloque intégration front / worker / orchestrateur externe. | **P1** |
 | Pseudonymisation HDS pré-indexation | Hooks avant `upsert_chunks` pour détecter / masquer identifiants nominatifs (IPP, nom, date naissance) dans texte et métadonnées. | Risque conformité RGPD/HDS si documents réels indexés sans anonymisation. | **P0** |
@@ -49,8 +48,10 @@ Pour éviter les doublons, le chemin suivant est **opérationnel** en V1 :
 - Index `memory` ou Qdrant hybride (dense + BM25 + rerank optionnel)
 - Extraction pilotée `StudySchema` : `lab_deterministic`, `narrative_keywords`, `imaging_langextract` (Ollama)
 - Règles métier : temporalité, mapping, normalisation, score confiance, validation basique
-- Export JSON + CSV mock dans `outputs/<document_id>/`
+- Export JSON + CSV mock + XLS réel (résolution patient, alias colonnes, politiques overwrite)
+- Templates JSON d'évaluation imbriqués pour les documents labo et imagerie
+- Évaluation offline : présence, valeur, contrat et Recall@K silver
 
 ---
 
-*Dernière mise à jour : mai 2026 — aligné sur la branche `feat/indexing-hybrid-finalize` et l’audit pipeline du dépôt.*
+*Dernière mise à jour : août 2026 — aligné sur la branche `internship-handover`.*

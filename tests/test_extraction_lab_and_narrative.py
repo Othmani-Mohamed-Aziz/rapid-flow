@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.extraction.lab_heuristics import (
     builtin_lab_analyte_specs,
+    canonical_lab_key_for_name,
     extract_comorbidity_observations,
     extract_lab_observations,
     extract_narrative_keyword_observations,
@@ -84,3 +85,10 @@ def test_narrative_custom_keywords() -> None:
 def test_builtin_lab_specs_cover_default_analytes() -> None:
     keys = {s.canonical_key for s in builtin_lab_analyte_specs()}
     assert {"AST", "ALT", "AFP", "PLT"}.issubset(keys)
+
+
+def test_french_lab_aliases_resolve_to_ecrf_canonical_keys() -> None:
+    assert canonical_lab_key_for_name("Transaminase ASAT (S.G.O.T).") == "AST"
+    assert canonical_lab_key_for_name("Transaminase ALAT (S.G.P.T).") == "ALT"
+    assert canonical_lab_key_for_name("Bilirubine totale") == "Total_bilirubine"
+    assert canonical_lab_key_for_name("CRP 3ème génération") == "CRP"

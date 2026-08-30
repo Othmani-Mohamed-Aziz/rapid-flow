@@ -17,6 +17,8 @@ from app.etl.ecrf_export_policy import (
     partition_cell_updates_for_ecrf,
 )
 from app.etl.export import EcrfExportService
+from app.etl.imaging_template_export import export_imaging_template
+from app.etl.lab_template_export import export_lab_template
 from app.etl.overwrite_policy import (
     EcrfTemplateSnapshot,
     XlsOverwritePolicy,
@@ -47,7 +49,7 @@ from app.retrieval.workflow_orchestrator import (
     VectorStoreWorkflowOrchestrator,
 )
 from app.routing.router import DocumentRouter, KeywordHeuristicDocumentRouter
-from app.schemas.enums import FieldFamily
+from app.schemas.enums import DocumentType, FieldFamily
 from app.schemas.models import AuditRecord, EcrfCellUpdate, PipelineResult
 from app.schemas.study_schema import StudySchema
 from app.utils.audit import AuditTrailService
@@ -90,6 +92,10 @@ class PipelineOrchestrator:
             model_name=self.settings.mock_llama_model_name,
             schema_version=self.study_schema.schema_version,
         )
+        self.lab_extraction = LabDeterministicStrategy(
+            study_schema=self.study_schema,
+            schema_version=self.study_schema.schema_version,
+        )
         extractor_registry = ExtractorRegistry(
             imaging=ImagingLangextractStrategy(
                 study_schema=self.study_schema,
@@ -99,10 +105,7 @@ class PipelineOrchestrator:
                 schema_version=self.settings.langextract_schema_version,
                 langextract_enabled=self.settings.langextract_enabled,
             ),
-            lab=LabDeterministicStrategy(
-                study_schema=self.study_schema,
-                schema_version=self.study_schema.schema_version,
-            ),
+            lab=self.lab_extraction,
             narrative=NarrativeKeywordsStrategy(
                 study_schema=self.study_schema,
                 schema_version=self.study_schema.schema_version,
@@ -293,6 +296,13 @@ class PipelineOrchestrator:
             family_hits=family_hits,
             extraction_jobs=extraction_jobs,
         )
+        if doc_type == DocumentType.LAB_BLOOD_PANEL and parsed.structured_lab_lines:
+            observations = [
+                observation
+                for observation in observations
+                if observation.extraction_method != "lab_deterministic"
+            ]
+            observations.extend(self.lab_extraction.extract_document_lab_rows(parsed, chunks))
         for ob in observations:
             audit.append(
                 self.audit.from_observation(
@@ -345,9 +355,14 @@ class PipelineOrchestrator:
             fd = self.registry.get(cand.field_name)
             if fd is None:
                 continue
+            retrieval_score = (
+                None
+                if cand.observation.extraction_method == "lab_document_rows"
+                else best_retrieval.get(cand.observation.field_family)
+            )
             blended, ok = self.confidence.score_candidate(
                 cand,
-                retrieval_score=best_retrieval.get(cand.observation.field_family),
+                retrieval_score=retrieval_score,
                 autofill_threshold=fd.autofill_threshold,
             )
             obs_scored = cand.observation.model_copy(update={"confidence": blended})
@@ -434,6 +449,26 @@ class PipelineOrchestrator:
             },
         )
         paths = self.export_service.export(result, output_dir)
+        if (
+            doc_type == DocumentType.LAB_BLOOD_PANEL
+            and self.settings.export_lab_template_json_enabled
+        ):
+            lab_template_path = export_lab_template(
+                observations,
+                output_dir,
+                source_path=document_path,
+            )
+            paths["lab_template_json"] = str(lab_template_path.resolve())
+        if (
+            doc_type == DocumentType.IMAGING_REPORT
+            and self.settings.export_imaging_template_json_enabled
+        ):
+            imaging_template_path = export_imaging_template(
+                ecrf_updates,
+                output_dir,
+                source_path=document_path,
+            )
+            paths["imaging_template_json"] = str(imaging_template_path.resolve())
         audit.append(
             self.audit.record_step(
                 document_id=raw.document_id,

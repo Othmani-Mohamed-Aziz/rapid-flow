@@ -81,3 +81,32 @@ def test_numeric_mm_normalization() -> None:
     out = svc.apply(obs, fd)
     assert out.normalized_value == 45.5
     assert out.unit == "mm"
+
+
+def test_numeric_mm_converts_cm_evidence() -> None:
+    svc = NormalizationService()
+    obs = ExtractedObservation(
+        observation_id="o4",
+        field_family=FieldFamily.IMAGING_RECIST,
+        normalized_value=9.6,
+        unit="mm",
+        confidence=0.8,
+        evidence_text="9.6 cm",
+        extraction_method="test",
+        extra={"canonical_imaging_key": "Size_major_nodule_mm"},
+    )
+    fd = FieldDefinition(
+        field_name="Size_major_nodule_mm_start_AtezoBev_D0",
+        field_type="numeric",
+        document_types_allowed=[DocumentType.IMAGING_REPORT],
+        extraction_family=ExtractionFamily.IMAGING_RECIST,
+        field_family=FieldFamily.IMAGING_RECIST,
+        temporal_scope=TemporalScope.BASELINE,
+        normalization_rule="numeric_mm",
+        target_column="Size_major_nodule_mm_start_AtezoBev_D0",
+        autofill_threshold=0.7,
+        canonical_key="Size_major_nodule_mm",
+    )
+    out = svc.apply(obs, fd)
+    assert out.normalized_value == 96
+    assert out.unit == "mm"

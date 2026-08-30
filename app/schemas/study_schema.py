@@ -31,13 +31,17 @@ DEFAULT_LANGEXTRACT_CLASS_TO_CANONICAL: dict[str, str] = {
 # Descriptions LangExtract par défaut (surchargées via `ExtractionCatalog`).
 DEFAULT_LANGEXTRACT_CLASS_DESCRIPTIONS: dict[str, str] = {
     "lesion_size_mm": (
-        "taille d'une lésion ou nodule en millimètres (valeur numérique dans attributes.value_mm)"
+        "taille de la lésion cible au bilan de référence (J0, D0, inclusion) en millimètres "
+        "(attributes.value_mm). Si le texte est en cm, convertir (5,3 cm → 53). "
+        "Ne pas extraire la mesure actuelle ni les lésions non cibles."
     ),
     "lesion_description": "description localisée d'une lésion (segment, organe)",
     "recist_response": (
-        "catégorie de réponse tumorale si mentionnée (CR, PR, SD, PD, NE ou libellé français)"
+        "catégorie RECIST officielle de la CONCLUSION uniquement "
+        "(CR, PR, SD, PD, NE ou libellé français). "
+        "Ignorer l'indication, l'impression morphologique et les codes non retenus."
     ),
-    "imaging_conclusion": "phrase de conclusion synthétique du radiologue",
+    "imaging_conclusion": "phrase de CONCLUSION du radiologue, pas les findings",
 }
 
 _RECIST_CANON_CODES = frozenset({"CR", "PR", "SD", "PD", "NE"})

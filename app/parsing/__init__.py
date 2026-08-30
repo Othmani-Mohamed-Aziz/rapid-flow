@@ -3,6 +3,8 @@ from app.parsing.chunking import (
     ChunkingService,
     DefaultChunkingService,
     HeuristicLabChunkingService,
+    ImagingReportChunkingService,
+    LabRowChunkingService,
     SectionBasedChunkingService,
 )
 from app.parsing.heuristic_text import HeuristicTextParser
@@ -15,6 +17,8 @@ __all__ = [
     "ChunkingService",
     "DefaultChunkingService",
     "HeuristicLabChunkingService",
+    "ImagingReportChunkingService",
+    "LabRowChunkingService",
     "SectionBasedChunkingService",
     "HeuristicTextParser",
     "LabReportPostProcessor",
