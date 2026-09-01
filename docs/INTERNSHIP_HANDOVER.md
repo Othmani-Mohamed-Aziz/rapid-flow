@@ -180,6 +180,78 @@ The lab path became primarily deterministic:
 - Lab predictions are exported in the nested evaluator format:
   `Section/Subsection/Analyte/{valeur, unité}`.
 
+#### 3.6.1 Detailed regular-expression improvements
+
+The lab post-processor regexes were extended to recover values from common French
+laboratory-report layouts while preventing reference ranges from being mistaken for
+patient results.
+
+**Dot-leader rows.** `_DOT_ROW` detects analyte labels followed by at least three dots,
+including rows such as `Créatinine ........ 61.9 umol/L`. `_LEADING_VALUE` then parses
+the value and optional unit at the beginning of the remaining text:
+
+```python
+_DOT_ROW = re.compile(r"(?P<name>[^\n|]{2,120}?)\.{3,}", re.I)
+_LEADING_VALUE = re.compile(
+    r"^\s*\|?\s*(?P<val>[<>]?\s*-?\d+(?:[.,]\d+)?)[ \t]*"
+    r"(?P<unit>%|10\^\d+/mm3|/[A-Za-z0-9³]+|[A-Za-zµ][A-Za-z0-9µ/^.²³-]*)?",
+    re.I,
+)
+```
+
+**Inequality results.** `_INEQUALITY_VALUE` accepts `Inf à`, `Sup à`, `<`, `>`, `≤`,
+and `≥`, with an optional unit:
+
+```python
+_INEQUALITY_VALUE = re.compile(
+    r"^\s*\|?\s*(?P<val>(?:Inf(?!\.)\s*à|Sup(?!\.)\s*à|[<>≤≥])\s*-?\d+(?:[.,]\d+)?)"
+    rf"[ \t]*(?P<unit>{_UNIT})?",
+    re.I,
+)
+```
+
+The negative lookahead `(?!\.)` distinguishes a patient result such as `Inf à 0.8`
+from a reference limit such as `Inf. à 8.6`.
+
+**Qualitative results.** `_TEXT_VALUE` supports frequent French textual values and their
+gender/plural variants:
+
+```python
+_TEXT_VALUE = re.compile(
+    r"^\s*\|?\s*(?P<val>Tr[èe]s\s+nombreuses|Nombreuses|Quelques|Mod[ée]r[ée]es?|Rares?"
+    r"|Absent(?:es|e|s)?|Pr[ée]sent(?:es|e|s)?)\b",
+    re.I,
+)
+```
+
+Examples include `Absente`, `Absentes`, `Présent`, `Présentes`, `Rare`, `Rares`,
+`Modérées`, and `Très nombreuses`.
+
+**Reference-range rejection.** `_RANGE_START` prevents normal ranges and limits from
+being extracted as patient values:
+
+```python
+_RANGE_START = re.compile(
+    r"^\s*\|?\s*(?:Inf\.\s*à|Sup\.\s*à|-?\d+(?:[.,]\d+)?\s*à)\s*-?\d",
+    re.I,
+)
+```
+
+Rejected examples include `3.4 à 20.5`, `Inf. à 8.6`, and `Sup. à 10`.
+
+**Flexible units.** `_UNIT` accepts percentages, blood-cell count notation, slash-based
+units, micro symbols, decimal powers, and common concentration units:
+
+```python
+_UNIT = r"%|10\^\d+/mm3|/[A-Za-z0-9³]+|[A-Za-zµ][A-Za-z0-9µ/^.²³-]*"
+```
+
+This covers forms such as `umol/L`, `mg/L`, `ng/ml`, `10^3/mm3`, and `%`.
+
+These regexes provide the lexical recognition layer. Columnar-layout recovery,
+label/result alignment, delayed-value scanning after reference tables, and dual-unit
+deduplication are parsing algorithms built around them rather than regex-only changes.
+
 Relevant files:
 
 - `app/parsing/lab_post_processor.py`
