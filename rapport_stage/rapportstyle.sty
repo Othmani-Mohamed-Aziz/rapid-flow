@@ -1,0 +1,42 @@
+\ProvidesPackage{rapportstyle}[2026/09/09 Stage ENSI]
+% Compatible avec PDFLaTeX (compilateur Overleaf par défaut).
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[french,english]{babel}
+\usepackage{newtxtext,newtxmath}
+\usepackage[a4paper,margin=2.5cm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{setspace}
+\onehalfspacing
+\usepackage{graphicx}
+\usepackage{xcolor}
+\definecolor{ensiblue}{HTML}{163B65}
+\definecolor{softblue}{HTML}{EAF2F8}
+\usepackage{booktabs,longtable,array,tabularx,multirow}
+\usepackage{enumitem}
+\setlist{nosep}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,calc}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{float}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=ensiblue,citecolor=ensiblue,urlcolor=ensiblue,pdftitle={Rapport de stage AMALYTICS}}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\nouppercase{\leftmark}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\usepackage{titlesec}
+\titleformat{\chapter}[display]{\bfseries\color{ensiblue}\Huge}{\chaptername~\thechapter}{12pt}{\Huge}
+\titlespacing*{\chapter}{0pt}{-12pt}{25pt}
+\usepackage{csquotes}
+\usepackage[backend=biber,style=numeric,sorting=nyt]{biblatex}
+\usepackage{listings}
+\lstdefinestyle{code}{basicstyle=\ttfamily\small,breaklines=true,frame=single,backgroundcolor=\color{softblue},columns=fullflexible}
+\lstset{style=code}
+\newcommand{\important}[1]{\begin{center}\fcolorbox{ensiblue}{softblue}{\parbox{0.88\textwidth}{#1}}\end{center}}

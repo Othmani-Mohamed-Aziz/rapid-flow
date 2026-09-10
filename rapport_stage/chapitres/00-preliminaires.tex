@@ -1,0 +1,41 @@
+\begin{titlepage}
+\centering
+{\Large République Tunisienne\par}
+\vspace{0.2cm}
+{\large Ministère de l'Enseignement Supérieur et de la Recherche Scientifique\par}
+\vspace{0.5cm}
+{\Large\bfseries École nationale des sciences de l'informatique\par}
+\vspace{1.6cm}
+{\large Rapport de stage d'été\par}
+\vspace{0.8cm}
+{\color{ensiblue}\rule{\textwidth}{1.2pt}\par}
+\vspace{0.45cm}
+{\LARGE\bfseries Développement d'une solution d'extraction automatique d'informations à partir de documents médicaux\par}
+\vspace{0.45cm}
+{\color{ensiblue}\rule{\textwidth}{1.2pt}\par}
+\vfill
+\begin{tabular}{p{0.45\textwidth}p{0.45\textwidth}}
+\textbf{Réalisé par :} & \textbf{Organisme d'accueil :}\\
+Mohamed Aziz Othmani & AMALYTICS, Paris\\[0.5cm]
+\textbf{Encadrante de stage :} & \textbf{Période :}\\
+Saima Bel Hadj & 1\textsuperscript{er} juillet -- 31 août 2026
+\end{tabular}
+\vfill
+{\large Année universitaire 2025--2026\par}
+\end{titlepage}
+
+\chapter*{Remerciements}
+\addcontentsline{toc}{chapter}{Remerciements}
+Je tiens à remercier Madame Saima Bel Hadj pour son encadrement, sa disponibilité et la confiance accordée pendant ce stage. Ses retours ont permis de cadrer les choix techniques et de transformer des besoins d'extraction complexes en objectifs vérifiables. Je remercie également l'équipe d'AMALYTICS pour l'environnement de travail, les échanges professionnels et l'occasion de contribuer à un sujet à l'intersection du logiciel, de la donnée et de la santé. Enfin, j'adresse mes remerciements à l'École nationale des sciences de l'informatique pour la formation qui a rendu cette expérience possible.
+
+\chapter*{Résumé}
+\addcontentsline{toc}{chapter}{Résumé}
+Ce rapport présente le travail réalisé durant un stage d'été de deux mois au sein d'AMALYTICS. L'objectif était de concevoir et de faire évoluer une solution capable d'extraire, à partir de documents médicaux hétérogènes, les informations nécessaires à l'alimentation de formulaires électroniques de recueil de données cliniques (eCRF). La solution développée repose sur une chaîne modulaire : ingestion locale, analyse de documents PDF et texte, structuration, découpage spécialisé, recherche d'information, extraction, normalisation, validation et export vers des formats JSON, CSV et XLS. Le travail a porté en particulier sur les comptes rendus biologiques et d'imagerie. Des mécanismes de traçabilité, de séparation par étude et de contrôle avant écriture ont été intégrés. L'évaluation hors ligne sur des jeux synthétiques ou localement préparés montre une amélioration importante du rappel et de l'exactitude des valeurs. Ces résultats ne constituent toutefois pas une validation clinique indépendante.\par
+\textbf{Mots-clés :} eCRF, extraction d'information, documents médicaux, RAG, recherche hybride, traçabilité, validation.
+
+\begin{otherlanguage}{english}
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+This report describes a two-month summer internship at AMALYTICS. Its objective was to design and improve a solution that extracts information from heterogeneous medical documents in order to populate electronic clinical report forms (eCRFs). The implemented pipeline is modular: local ingestion, PDF and text parsing, structuring, specialised chunking, retrieval, extraction, normalisation, validation and JSON, CSV and XLS export. The work focused on laboratory and imaging reports. Traceability, study isolation and safe write controls were incorporated. Offline evaluation on synthetic or locally staged datasets shows substantial recall and value-accuracy improvements. These results must not be interpreted as independent clinical validation.\par
+\textbf{Keywords:} eCRF, information extraction, medical documents, retrieval augmented generation, hybrid retrieval, traceability, validation.
+\end{otherlanguage}

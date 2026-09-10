@@ -1,0 +1,10 @@
+\chapter*{Conclusion générale et perspectives}
+\addcontentsline{toc}{chapter}{Conclusion générale et perspectives}
+
+Ce stage réalisé chez AMALYTICS a permis de contribuer au développement d'une solution d'extraction automatique d'informations à partir de documents médicaux. Le travail a consisté à renforcer une pipeline eCRF modulaire, depuis l'ingestion de documents locaux jusqu'à la génération d'exports contrôlés. L'architecture obtenue distingue clairement l'analyse du document, le découpage, la recherche, l'extraction, les règles métier et l'écriture. Cette séparation apporte une meilleure maintenabilité et rend les résultats plus faciles à auditer.
+
+Les contributions principales concernent la robustesse du parsing PDF, les stratégies de découpage spécifiques aux bilans et à l'imagerie, la recherche hybride isolée par étude, l'extraction pilotée par un schéma versionné, la normalisation temporelle et un cadre d'évaluation reproductible. Les améliorations mesurées sur les jeux de test montrent notamment un gain de rappel pour les données biologiques et un gain d'exactitude pour les données d'imagerie difficiles.
+
+La valeur de la solution ne réside pas uniquement dans son taux de remplissage. Elle dépend de sa capacité à expliquer l'origine d'une proposition, à la contrôler avant export et à signaler ses limites. Cette vigilance est particulièrement importante dans le domaine médical. Les résultats présentés restent des résultats techniques sur des données synthétiques ou localement préparées; ils ne constituent pas une validation clinique.
+
+À court terme, les perspectives prioritaires sont la mise en place d'une étape de revue humaine, la pseudonymisation avant indexation, l'exposition de la pipeline via une API sécurisée et l'extension des scénarios de test. À plus long terme, une validation sur des données externes gouvernées, accompagnée d'indicateurs de robustesse et de monitoring, permettrait d'évaluer la transférabilité de la solution dans un cadre de production.

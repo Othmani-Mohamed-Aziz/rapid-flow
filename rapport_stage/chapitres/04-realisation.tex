@@ -1,0 +1,83 @@
+\chapter{Réalisation de la solution}
+\section{Environnement de développement}
+La solution est développée en Python, avec une compatibilité testée dans le projet pour Python 3.12 et 3.13. Les contrats de données reposent sur Pydantic, qui permet de valider les modèles et de sérialiser les échanges \cite{pydantic}. Le projet dispose d'une configuration par variables d'environnement, d'une suite de tests, de contrôles Ruff et MyPy, ainsi que de fichiers Docker Compose pour les environnements de développement, de test et de recherche vectorielle.
+
+\begin{table}[H]
+\centering
+\caption{Principales technologies mobilisées}
+\begin{tabularx}{\textwidth}{lX}
+\toprule
+Composant & Rôle dans la solution\\
+\midrule
+Python & Langage principal et orchestration de la pipeline\\
+Pydantic & Contrats de données et validation des échanges\\
+pypdf / Docling & Extraction de texte PDF et structuration optionnelle\\
+Qdrant & Indexation vectorielle et recherche hybride\\
+Ollama / LangExtract & Extraction structurée d'informations narratives d'imagerie\\
+openpyxl & Production ou mise à jour de classeurs XLS\\
+pytest & Tests unitaires, intégration et évaluation déterministe\\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Ingestion, parsing et routage}
+L'ingestion charge des documents locaux PDF, TXT ou Markdown. Pour les PDF, le mode léger s'appuie sur \texttt{pypdf}; le mode enrichi tente Docling lorsque la dépendance est disponible. En mode automatique, l'échec de Docling entraîne un repli vers \texttt{pypdf}. Cette stratégie évite de bloquer une exécution lorsque les composants optionnels ou leurs modèles ne sont pas disponibles.
+
+Le texte produit est ensuite enrichi : métadonnées, sections, dates éventuelles et lignes biologiques structurées sont conservées. Un score contextuel permet de router le document vers une catégorie pertinente et d'éviter, par exemple, qu'un compte rendu de scanner soit assimilé à un bilan biologique en raison de quelques mots communs.
+
+\section{Découpage spécialisé}
+Le découpage générique par nombre de caractères ne convient pas à tous les documents. Trois stratégies sont implémentées. \texttt{SectionBasedChunkingService} préserve les sections cliniques et leurs positions. \texttt{LabRowChunkingService} regroupe des lignes d'analytes reconstruites par sous-section. \texttt{ImagingReportChunkingService} conserve un compte rendu d'imagerie court dans son ensemble afin de maintenir le lien entre mesure initiale, mesure courante, lésions distractrices et conclusion.
+
+Cette distinction a un impact direct sur la qualité : couper une mesure de référence de la conclusion RECIST conduit à proposer des valeurs plausibles mais erronées. La conservation du contexte est donc un choix de conception, et non une simple optimisation de performance.
+
+\section{Recherche hybride et isolation par étude}
+Deux backends sont disponibles. Le backend en mémoire est déterministe et rapide pour les tests. Le backend Qdrant permet une recherche dense et sparse, suivie d'une fusion par rang réciproque. Un réordonnancement BGE peut être activé pour les meilleurs candidats. Les collections sont isolées par étude ou locataire ; l'identifiant de locataire est obligatoire lors de l'indexation et de la recherche.
+
+L'isolation réduit le risque de récupération d'un contexte appartenant à une autre étude. Les filtres de version d'embedding et les mécanismes de reprise en cas d'erreur transitoire complètent cette protection. Ces mécanismes ne remplacent pas les exigences de gouvernance des données : toute utilisation de données réelles doit respecter les règles d'accès, de pseudonymisation et de sécurité applicables.
+
+\section{Extraction pilotée par le schéma}
+Le \texttt{StudySchema} remplace les paramètres codés en dur. Il décrit les champs attendus et permet d'ajouter une étude sans réécrire l'orchestrateur. Lorsqu'un document est routé, le planificateur active les emplois d'extraction nécessaires. Les observations restent intermédiaires jusqu'à leur projection en candidats et à leur validation.
+
+\begin{lstlisting}[caption={Exemple simplifié de déclaration d'un champ dans le schéma d'étude},label={lst:schema}]
+{
+  "canonical_key": "creatinine",
+  "document_types": ["laboratory"],
+  "strategy": "lab",
+  "normalization": "numeric_with_unit",
+  "target_column": "CREATININE",
+  "autofill_threshold": 0.90
+}
+\end{lstlisting}
+
+\section{Extraction des bilans biologiques}
+La voie biologique est principalement déterministe. Le post-traitement reconstruit des \texttt{StructuredLabLine} à partir de texte PDF ou de tables Markdown. Les lignes avec points de conduite, valeurs en ligne, colonnes séparées ou valeur placée avant le libellé sont prises en charge. Les intervalles de référence, en-têtes, pieds de page et bruit de pagination sont filtrés.
+
+Des expressions régulières reconnaissent les résultats numériques, les inégalités et certaines valeurs qualitatives. Les alias français et anglais sont mappés vers des clés canoniques. Lorsque la ligne est complète et structurée, elle peut être projetée directement vers les candidats sans dépendre d'un filtre top-k de recherche ; ce choix a permis de récupérer des valeurs auparavant absentes.
+
+\section{Extraction d'imagerie et RECIST}
+L'imagerie repose sur LangExtract et un modèle local exposé via Ollama. Les règles de normalisation reconnaissent les unités centimètre et millimètre et convertissent les valeurs vers l'unité attendue. La sélection de la mesure de base favorise le contexte \emph{J0}, \emph{D0}, \emph{inclusion}, \emph{scanner initial} ou \emph{référence}; les mesures d'examens courants et les lésions non cibles sont dépriorisées.
+
+La réponse RECIST est recherchée en priorité dans la conclusion officielle. Les mentions informelles ou présentes dans l'indication sont volontairement moins fiables. Un repli déterministe sur la conclusion intervient si l'extracteur ne retourne pas de catégorie valide. Ces choix ciblent une source d'erreur observée : une réponse citée comme hypothèse dans le texte ne doit pas masquer la conclusion finale.
+
+\section{Règles métier et export}
+Après extraction, les candidats sont normalisés, associés à une temporalité et confrontés aux contraintes déclarées. Le candidat valide ayant le meilleur score est retenu pour chaque colonne. Les politiques \texttt{empty\_only}, \texttt{always} et \texttt{never} rendent explicite le comportement face à une cellule déjà remplie. Les exports JSON et CSV permettent l'audit; l'export XLS, fondé sur \texttt{openpyxl}, gère les colonnes, les alias et la résolution de la ligne patient.
+
+\important{Aucune valeur n'est présentée comme une décision médicale. L'export est une proposition contrôlée par des règles techniques et doit s'inscrire dans une procédure de revue humaine adaptée au contexte clinique.}
+
+\section{Tests et intégration continue}
+Le dépôt contient des tests de parsing, découpage, extraction, mapping, normalisation, validation, ETL et évaluation. Les scénarios Qdrant sont optionnels afin de ne pas imposer une infrastructure vectorielle dans les tests rapides. L'intégration continue exécute les contrôles de qualité et des évaluations déterministes. Cette stratégie rend les régressions mesurables et facilite la reprise du projet.
+
+\section{Choix d'implémentation et compromis}
+La coexistence de plusieurs parseurs est un compromis entre richesse structurale et robustesse opérationnelle. Un parseur avancé peut mieux préserver les tableaux et la hiérarchie visuelle, mais son installation ou ses modèles peuvent être indisponibles. Le repli vers un parseur léger préserve la capacité à traiter un document, au prix d'une structure plus pauvre. Les services consommant le résultat ne dépendent pas du parseur choisi, car ils reçoivent le même contrat \texttt{ParsedDocument}.
+
+La recherche vectorielle est également optionnelle. Elle est pertinente lorsque le corpus ou les familles de champs justifient une récupération ciblée de contexte. En revanche, une ligne biologique correctement reconstruite ne gagne pas nécessairement à être redécouverte par recherche. Le chemin déterministe court-circuite alors une étape inutile et rend le comportement plus explicable.
+
+Enfin, le choix de laisser les observations intermédiaires distinctes des mises à jour eCRF rend la chaîne légèrement plus verbale, mais protège contre une confusion fréquente : détecter un élément textuel ne signifie pas automatiquement qu'il doit être inscrit dans un champ. Une valeur peut être observée, puis écartée parce que son unité, sa temporalité ou sa colonne cible ne correspond pas au schéma actif.
+
+\section{Exemple de traitement d'un résultat biologique}
+Considérons un extrait contenant un libellé, des points de conduite et une valeur avec unité. Le post-processeur identifie d'abord le libellé, puis isole la valeur et l'unité sans prendre un intervalle de référence pour un résultat patient. L'alias du libellé est ensuite associé à une clé canonique. Une règle de normalisation transforme la représentation textuelle en nombre ou en valeur qualitative attendue. Enfin, le validateur vérifie que l'unité est compatible avec le champ cible.
+
+La trace garde l'extrait source et la position dans le texte. Si le libellé est ambigu, si l'unité est inconnue ou si la cellule est déjà remplie selon une politique restrictive, aucun export validé n'est produit. Le cas reste toutefois visible dans les artefacts de pipeline, ce qui permet un diagnostic ultérieur.
+
+\section{Reproductibilité}
+La documentation de passation décrit les dépendances, les jeux de test disponibles dans le dépôt, les scripts d'évaluation et les limites d'accès aux jeux non versionnés. Les sorties comportent un résumé humain lisible et un rapport JSON complet. Cette double sortie répond à des usages différents : une vérification rapide par un encadrant et une analyse détaillée par un développeur. La reproductibilité exige aussi de versionner le schéma d'étude et les paramètres d'exécution : une même donnée source peut produire des résultats différents si les règles, les modèles ou les seuils changent.
